@@ -10,16 +10,17 @@ document.addEventListener("DOMContentLoaded", function () {
   let customizerLoading = null;
 
   //  Make DOMContentLoaded callbacks registered by lazily-loaded scripts run
-  //  immediately. Those scripts (option-card.js) are injected AFTER the real
-  //  DOMContentLoaded has fired, so an event listener would never trigger.
-  //  Since the DOM is already parsed, running them on a microtask is equivalent.
+  //  after the current paint. Those scripts (option-card.js) are injected AFTER
+  //  the real DOMContentLoaded has fired, so an event listener would never
+  //  trigger. Scheduling this as a task keeps heavy init from blocking the
+  //  modal loader paint in the same script-load turn.
   function patchReadyListeners() {
     if (patchReadyListeners.done) return;
     patchReadyListeners.done = true;
     const nativeAdd = document.addEventListener.bind(document);
     document.addEventListener = function (type, listener, options) {
       if (type === "DOMContentLoaded" && document.readyState !== "loading") {
-        Promise.resolve().then(listener);
+        setTimeout(() => listener.call(document, new Event("DOMContentLoaded")), 0);
         return;
       }
       return nativeAdd(type, listener, options);
@@ -56,6 +57,13 @@ document.addEventListener("DOMContentLoaded", function () {
     if (customizerLoading) return customizerLoading;
 
     customizerLoading = new Promise((resolve) => {
+      //  TIMING — measure how long the customizer template content takes to load.
+      const t0 = performance.now();
+      const mark = (label) =>
+        console.log(
+          `[customizer] ${label}: ${(performance.now() - t0).toFixed(1)}ms`
+        );
+
       const template = document.getElementById("customizer-template");
       if (!template) {
         customizerReady = true;
@@ -68,31 +76,94 @@ document.addEventListener("DOMContentLoaded", function () {
         template.getAttribute("data-option-card-src"),
       ].filter(Boolean);
 
-      //  Clone the inert template content into the modal — this is when images
-      //  and DOM actually render/load.
       const parent = template.parentElement;
-      parent.appendChild(template.content.cloneNode(true));
+
+      //  STEP-BY-STEP LOAD.
+      //  Phase 1 (now): the light, immediately-visible content — fabric box,
+      //  the main style list (.overview-list[data-index="0"]) and the action
+      //  buttons. Pull the heavy child option lists (.customizer-list.childs-list
+      //  — thousands of collection <li>s, the part that froze the UI) OUT of the
+      //  template before injecting so they don't get cloned/laid out up front.
+      //  They are streamed back in during idle, after phase 1 has painted.
+      const deferredChildLists = Array.from(
+        template.content.querySelectorAll(".customizer-list.childs-list")
+      );
+      deferredChildLists.forEach((list) => list.remove());
+
+      //  Move (don't clone) the now-light content into the modal — moving avoids
+      //  duplicating the whole subtree.
+      parent.appendChild(template.content);
       template.remove();
+      mark(
+        `phase 1 injected (${deferredChildLists.length} child lists deferred)`
+      );
+
+      //  Inject the deferred child lists into their original spot (inside
+      //  .overview, after the main style list). Idempotent + cheap: the nodes are
+      //  moved (not cloned) and start hidden, so insertion costs almost nothing.
+      function injectDeferredChildLists() {
+        if (!deferredChildLists.length) return;
+        const overview = parent.querySelector(".overview");
+        if (!overview) return;
+        const cStart = performance.now();
+        const frag = document.createDocumentFragment();
+        deferredChildLists.forEach((list) => frag.appendChild(list));
+        overview.appendChild(frag);
+        deferredChildLists.length = 0; //  mark as done so re-calls are no-ops
+        console.log(
+          `[customizer] child lists injected: ${(performance.now() - cStart).toFixed(1)}ms`
+        );
+      }
+
+      //  Safety hook: if the user clicks a style before the idle injection runs,
+      //  option-card.js calls this to materialize the child lists on demand.
+      window.__injectCustomizerChildLists = injectDeferredChildLists;
+
+      function scheduleChildListInjection() {
+        if (window.requestIdleCallback) {
+          requestIdleCallback(injectDeferredChildLists, { timeout: 1000 });
+        } else {
+          setTimeout(injectDeferredChildLists, 0);
+        }
+      }
 
       patchReadyListeners();
       const stylesReady = waitForInjectedStyles(parent);
+      stylesReady.then(() => mark("styles ready"));
 
-      //  Load the customizer scripts in order; their module-level code now finds
-      //  the injected DOM.
-      (function loadNext(i) {
+      function loadNext(i) {
         if (i >= scripts.length) {
           stylesReady.then(waitForPaint).then(() => {
             customizerReady = true;
+            mark("TOTAL (phase 1 ready)");
             resolve();
+            //  Phase 1 is interactive — stream the heavy child lists in now.
+            scheduleChildListInjection();
           });
           return;
         }
+        const sStart = performance.now();
         const s = document.createElement("script");
         s.src = scripts[i];
-        s.onload = () => loadNext(i + 1);
+        s.onload = () => {
+          console.log(
+            `[customizer] script ${scripts[i]} loaded+executed: ` +
+              `${(performance.now() - sStart).toFixed(1)}ms`
+          );
+          loadNext(i + 1);
+        };
         s.onerror = () => loadNext(i + 1);
         document.body.appendChild(s);
-      })(0);
+      }
+
+      //  Let the injected DOM, CSS, and loader paint before option-card.js runs
+      //  its startup queries/listeners. Without this yield, the first click can
+      //  spend a long task cloning DOM and executing the customizer script before
+      //  the user sees the modal respond.
+      stylesReady.then(waitForPaint).then(() => {
+        mark("first paint done — starting scripts");
+        loadNext(0);
+      });
     });
 
     return customizerLoading;
@@ -164,6 +235,11 @@ document.addEventListener("DOMContentLoaded", function () {
       return;
     }
 
+    //  TIMING — measure from this click until the template content is fully
+    //  injected, styled, painted, and its script has run.
+    const clickT0 = performance.now();
+    console.log("[customizer] open-modal clicked — loading content…");
+
     //  First open — show loaders on the button and in the modal while it loads.
     //  Kick off injection first so a hiccup in adjustModal can never block it.
     openBtn.classList.add("is-loading");
@@ -174,6 +250,10 @@ document.addEventListener("DOMContentLoaded", function () {
     loading.then(() => {
       hideModalLoader();
       openBtn.classList.remove("is-loading");
+      console.log(
+        `[customizer] content ready — ${(performance.now() - clickT0).toFixed(1)}ms ` +
+          `from click to fully loaded`
+      );
       setTimeout(() => {
         window.adjustModal();
       }, 50);
