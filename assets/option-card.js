@@ -530,11 +530,10 @@
   let stepSubtitles = {};
 
   function getnewList(index, total_options, childsIn, subTitle, mainparent, dataIds = []) {
-    //   The child option lists are injected lazily (during idle) after the modal
-    //   paints. If the user clicks a style before that idle pass runs, materialize
-    //   them on demand so the target list exists below.
-    if (typeof window.__injectCustomizerChildLists === 'function') {
-      window.__injectCustomizerChildLists();
+    //   Child option lists are injected on demand. Materialize the specific list
+    //   for this step (matched by childsIn + index) before we query for it below.
+    if (typeof window.__injectCustomizerChildList === 'function') {
+      window.__injectCustomizerChildList(childsIn, index);
     }
     currentIndex = index;
     currentListClass = childsIn;
@@ -669,6 +668,11 @@
         currentUL.classList.remove('openchilds');
       }
 
+      //   Safety: the previous step was injected on the way forward, but make
+      //   sure its list exists before we reveal it.
+      if (typeof window.__injectCustomizerChildList === 'function') {
+        window.__injectCustomizerChildList(currentListClass, prevIndex);
+      }
       const prevUL = document.querySelector(`.${currentListClass}[data-index="${prevIndex}"]`);
       if (prevUL) {
         prevUL.classList.remove('hidden');
@@ -1493,6 +1497,11 @@
           const reselection = event.target.getAttribute('reselection');
           const reselection_steps = event.target.getAttribute('reselection-step');
 
+          //   Editing from the summary jumps straight to a step's list, so make
+          //   sure all deferred child lists exist before we search them.
+          if (typeof window.__injectCustomizerChildLists === 'function') {
+            window.__injectCustomizerChildLists();
+          }
           getAllChildTabs().forEach(tab => {
             let hasVisibleLi = false;
 
@@ -1835,6 +1844,11 @@
         'input[type="radio"], input[type="checkbox"], input[type="text"], input[type="hidden"], input[type="number"], input[style_name]'
       );
       const sectionCards = document.querySelectorAll('a.option-card[style_name]');
+      //   Loading a saved selection reveals matching cards across every step, so
+      //   make sure all deferred child lists exist first.
+      if (typeof window.__injectCustomizerChildLists === 'function') {
+        window.__injectCustomizerChildLists();
+      }
       getAllChildTabs().forEach(tab => tab.classList.add('hidden'));
 
       //   Highlight section headers if saved value found

@@ -98,34 +98,49 @@ document.addEventListener("DOMContentLoaded", function () {
         `phase 1 injected (${deferredChildLists.length} child lists deferred)`
       );
 
-      //  Inject the deferred child lists into their original spot (inside
-      //  .overview, after the main style list). Idempotent + cheap: the nodes are
-      //  moved (not cloned) and start hidden, so insertion costs almost nothing.
-      function injectDeferredChildLists() {
+      //  Inject ONE child list <ul> on demand, matched by its childsIn class
+      //  ("styles"/"contrasts") + data-index, into its original spot inside
+      //  .overview. option-card.js calls this from getnewList the moment a style
+      //  li[data-list] is clicked, so each step's heavy cards are materialized
+      //  only when that step is actually opened.
+      const overviewOf = () => parent.querySelector(".overview");
+      function injectChildList(childsIn, index) {
         if (!deferredChildLists.length) return;
-        const overview = parent.querySelector(".overview");
+        const overview = overviewOf();
         if (!overview) return;
-        const cStart = performance.now();
+        const idx = String(index);
+        for (let k = deferredChildLists.length - 1; k >= 0; k--) {
+          const ul = deferredChildLists[k];
+          if (
+            ul.classList.contains(childsIn) &&
+            ul.getAttribute("data-index") === idx
+          ) {
+            const cStart = performance.now();
+            overview.appendChild(ul);
+            deferredChildLists.splice(k, 1);
+            console.log(
+              `[customizer] child list .${childsIn}[data-index="${idx}"] injected: ` +
+                `${(performance.now() - cStart).toFixed(1)}ms`
+            );
+          }
+        }
+      }
+
+      //  Inject every remaining child list at once — for flows that touch all
+      //  lists without going step-by-step (load-previous, summary "Edit").
+      function injectAllChildLists() {
+        if (!deferredChildLists.length) return;
+        const overview = overviewOf();
+        if (!overview) return;
         const frag = document.createDocumentFragment();
         deferredChildLists.forEach((list) => frag.appendChild(list));
         overview.appendChild(frag);
-        deferredChildLists.length = 0; //  mark as done so re-calls are no-ops
-        console.log(
-          `[customizer] child lists injected: ${(performance.now() - cStart).toFixed(1)}ms`
-        );
+        deferredChildLists.length = 0;
+        console.log("[customizer] all remaining child lists injected");
       }
 
-      //  Safety hook: if the user clicks a style before the idle injection runs,
-      //  option-card.js calls this to materialize the child lists on demand.
-      window.__injectCustomizerChildLists = injectDeferredChildLists;
-
-      function scheduleChildListInjection() {
-        if (window.requestIdleCallback) {
-          requestIdleCallback(injectDeferredChildLists, { timeout: 1000 });
-        } else {
-          setTimeout(injectDeferredChildLists, 0);
-        }
-      }
+      window.__injectCustomizerChildList = injectChildList;
+      window.__injectCustomizerChildLists = injectAllChildLists;
 
       patchReadyListeners();
       const stylesReady = waitForInjectedStyles(parent);
@@ -137,8 +152,9 @@ document.addEventListener("DOMContentLoaded", function () {
             customizerReady = true;
             mark("TOTAL (phase 1 ready)");
             resolve();
-            //  Phase 1 is interactive — stream the heavy child lists in now.
-            scheduleChildListInjection();
+            //  Child lists are no longer injected up front — each one is
+            //  materialized on demand when its style is clicked (see
+            //  option-card.js getnewList → window.__injectCustomizerChildList).
           });
           return;
         }
