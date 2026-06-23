@@ -1,8 +1,3 @@
-  // TIMING — how long this script blocks the main thread while it runs its
-  // top-level queries and listener wiring (the "UI stuck" window on first open).
-  const __optionCardT0 = performance.now();
-  console.time('[customizer] option-card.js execution');
-
   // select all required option
   function checkRequiredOptionsAndToggleButton(buttonSelector = '.btn-next-tab') {
     const requiredItems = getRequiredOptions();
@@ -151,6 +146,45 @@
     }
     schedulePriceUpdate();
   }
+  //   Apply the "this option is selected" visuals to its parent <li>. Shared by
+  //   applySelections (user picks an option) and handleloadprevious (restoring a
+  //   saved selection) — both produced this identical block.
+  function applySelectionVisuals(parentLi, {
+    selectImg, selectOptions, card_send, allselection, selectParent, currentTitle, endstep,
+  }) {
+    if (!parentLi) return;
+    parentLi.querySelector('.icon-check-circle')?.classList.add('active');
+    parentLi.querySelector('.selected')?.classList.remove('hidden');
+    parentLi.querySelector('.option-card')?.classList.add('select');
+    const parent_img = parentLi.querySelector('.select_img img');
+    const org_img = parentLi.querySelector('.org_img');
+    if (parent_img && org_img) {
+      org_img.classList.add('hidden');
+      parent_img.parentElement.classList.remove('hidden');
+      parent_img.onerror = () => {
+        parent_img.src = selectImg;
+      };
+      parent_img.src = selectImg;
+    }
+    const nameElement = parentLi.querySelector('.name');
+    const top = parentLi.querySelector('.top');
+    const bottom = parentLi.querySelector('.bottom');
+    if (nameElement && top && bottom) {
+      nameElement.innerHTML = selectOptions;
+      nameElement.classList.remove('hidden');
+      top.classList.remove('hidden');
+      bottom.classList.add('hidden');
+    }
+    parentLi.setAttribute('card-send', `[${card_send}]`);
+    parentLi.setAttribute('options-selected', `[${allselection}]`);
+    parentLi.setAttribute('summary-edit', `[${selectParent}]`);
+    parentLi.setAttribute('current-title', `[${currentTitle}]`);
+    parentLi.setAttribute('end-step', `[${endstep}]`);
+    parentLi.classList.add('selected_options');
+    if (typeof checkRequiredOptionsAndToggleButton === 'function') {
+      checkRequiredOptionsAndToggleButton();
+    }
+  }
   // --- Apply Selections ---
   function applySelections() {
     const lastSelectedId = this.dataset.lastSelected;
@@ -176,41 +210,9 @@
       : [];
     hasOptions(restrictedOptionIds, restricted_option_Pid, selectedParentId, why_not_name);
     // --- UI selection visuals ---
-    const parentLi = getOptionItemById(selectedParentId);
-    if (parentLi) {
-      parentLi.querySelector('.icon-check-circle')?.classList.add('active');
-      parentLi.querySelector('.selected')?.classList.remove('hidden');
-      parentLi.querySelector('.option-card')?.classList.add('select');
-      const parent_img = parentLi.querySelector('.select_img img');
-      const org_img = parentLi.querySelector('.org_img');
-      if (parent_img && org_img) {
-        org_img.classList.add('hidden');
-        parent_img.parentElement.classList.remove('hidden');
-        parent_img.onerror = () => {
-          parent_img.src = selectImg;
-        };
-        parent_img.src = selectImg;
-      }
-      const nameElement = parentLi.querySelector('.name');
-      const top = parentLi.querySelector('.top');
-      const bottom = parentLi.querySelector('.bottom');
-      if (nameElement && top && bottom) {
-        nameElement.innerHTML = selectOptions;
-        nameElement.classList.remove('hidden');
-        top.classList.remove('hidden');
-        bottom.classList.add('hidden');
-      }
-      parentLi.setAttribute('card-send', `[${card_send}]`);
-      parentLi.setAttribute('options-selected', `[${allselection}]`);
-      parentLi.setAttribute('summary-edit', `[${selectParent}]`);
-      parentLi.setAttribute('current-title', `[${currentTitle}]`);
-      parentLi.setAttribute('end-step', `[${endstep}]`);
-      parentLi.classList.add('selected_options');
-
-      if (typeof checkRequiredOptionsAndToggleButton === 'function') {
-        checkRequiredOptionsAndToggleButton();
-      }
-    }
+    applySelectionVisuals(getOptionItemById(selectedParentId), {
+      selectImg, selectOptions, card_send, allselection, selectParent, currentTitle, endstep,
+    });
     //   Mark this input as applied
     input.setAttribute('data-applied', 'true');
     appliedRadioInputs.add(input);
@@ -959,58 +961,51 @@
       }
     }
 
+    //   Return from the monogram tab back to the styles view. Shared by the
+    //   monogram prev button (on the first step) and the "remove monogram" action.
+    function returnToStylesFromMonogram() {
+      const modal = document.getElementById("fullscreen-modal");
+      if (modal.style.display === "flex") adjustModal();
+      monogram_tab.classList.add("hidden");
+      styles.classList.remove("hidden");
+      myTabContent.classList.remove("hidden");
+      commonly_btn.classList.remove("hidden");
+      specific_mono_btn.classList.add("hidden");
+      custom_hidden.forEach(el => el.classList.remove("custom_hide"));
+      const adjust_monoscroll = document.querySelector(".main-customizer-new .product_form_wrapper");
+      if (adjust_monoscroll) adjust_monoscroll.style.overflow = "auto";
+    }
+
+    //   Clear the monogram selection: deselect its card, uncheck its add-ons and
+    //   recompute the price. (The old code also summed charges into an
+    //   `extramonocharges` variable that was never read — dropped.)
+    function clearMonogramSelection() {
+      const mainmonoli = document.querySelector('.adjut_monogram');
+      const monogramOptions = document.querySelector('.monogram_options');
+      prev_tab?.classList.add('disabled');
+      mainmonoli?.querySelector('.option-card')?.classList.remove("select");
+      const mono_selection = mainmonoli?.querySelector('.selections ');
+      if (mono_selection) mono_selection.innerHTML = "";
+      monogramOptions?.querySelectorAll('input.customizer:checked').forEach(input => {
+        input.checked = false;
+      });
+      recalculatePrice({
+        priceContainers: document.querySelectorAll('.custom_price'),
+        cardPriceContainers: document.querySelectorAll('.card_custom_price'),
+        extraInput: document.querySelector('.customizer_additional_charges input'),
+      });
+    }
+
     function goToPrev() {
       if (currentIndex > 0) {
         currentIndex--;
         updateMonoView();
       } else {
-        const modal = document.getElementById("fullscreen-modal");
-            if (modal.style.display === "flex") {
-            adjustModal();
-              } 
-              // Return to styles tab only from .mono-prev-tab (not from .mono-prev-addons)
-              monogram_tab.classList.add("hidden");
-              styles.classList.remove("hidden");
-              myTabContent.classList.remove("hidden");
-              commonly_btn.classList.remove("hidden");
-              specific_mono_btn.classList.add("hidden");
-              custom_hidden.forEach(el => { el.classList.remove("custom_hide");});
-              const adjust_monoscroll = document.querySelector(".main-customizer-new .product_form_wrapper");
-              if (adjust_monoscroll) adjust_monoscroll.style.overflow= "auto"
-            const monogramOptions = document.querySelector('.monogram_options');
-            const mainmonoli = document.querySelector('.adjut_monogram');
-        const mono_selected = mainmonoli?.querySelector('.option-card');
-        const mono_selection = mainmonoli?.querySelector('.selections ');
+        // Return to styles tab only from .mono-prev-tab (not from .mono-prev-addons)
+        returnToStylesFromMonogram();
         if (mono_prev_tab && mono_prev_tab.classList.contains('mono-change')) {
-          prev_tab?.classList.add('disabled');
-          mono_selected?.classList.remove("select");
-          if (mono_selection) mono_selection.innerHTML = "";
-
-          let extramonocharges = 0;
-
-          if (monogramOptions) {
-            const checkedInputs = monogramOptions.querySelectorAll('input.customizer:checked');
-
-            //   First calculate charges — don't uncheck inside this loop
-            checkedInputs.forEach(input => {
-              const charge = parseFloat(input.getAttribute('more-charges')) || 0;
-              extramonocharges += charge;
-            });
-
-            //   Then uncheck in a separate step
-            checkedInputs.forEach(input => {
-              input.checked = false;
-            });
-          }
-
-
-          if (!recalculatePrice({
-            priceContainers: document.querySelectorAll('.custom_price'),
-            cardPriceContainers: document.querySelectorAll('.card_custom_price'),
-            extraInput: document.querySelector('.customizer_additional_charges input'),
-          })) return;
-
-          }
+          clearMonogramSelection();
+        }
       }
   }
     // Top navigation
@@ -1035,52 +1030,11 @@
     });
     // remove monogram selection 
     remove_mono_selection?.addEventListener("click", (e) => {
-    const modal = document.getElementById("fullscreen-modal");
-            if (modal.style.display === "flex") {
-            adjustModal();
-              } 
-              // Return to styles tab only from .mono-prev-tab (not from .mono-prev-addons)
-              monogram_tab.classList.add("hidden");
-              styles.classList.remove("hidden");
-              myTabContent.classList.remove("hidden");
-              commonly_btn.classList.remove("hidden");
-              specific_mono_btn.classList.add("hidden");
-              custom_hidden.forEach(el => { el.classList.remove("custom_hide");});
-              const adjust_monoscroll = document.querySelector(".main-customizer-new .product_form_wrapper");
-              if (adjust_monoscroll) adjust_monoscroll.style.overflow= "auto"
-            const monogramOptions = document.querySelector('.monogram_options');
-            const mainmonoli = document.querySelector('.adjut_monogram');
-            mainmonoli?.querySelector('.custom-title')?.classList.remove("hidden")
-            mainmonoli?.querySelector('.img')?.classList.add("hidden")
-        const mono_selected = mainmonoli?.querySelector('.option-card');
-        const mono_selection = mainmonoli?.querySelector('.selections ');
-          prev_tab?.classList.add('disabled');
-          mono_selected?.classList.remove("select");
-          if (mono_selection) mono_selection.innerHTML = "";
-
-          let extramonocharges = 0;
-
-          if (monogramOptions) {
-            const checkedInputs = monogramOptions.querySelectorAll('input.customizer:checked');
-
-            //   First calculate charges — don't uncheck inside this loop
-            checkedInputs.forEach(input => {
-              const charge = parseFloat(input.getAttribute('more-charges')) || 0;
-              extramonocharges += charge;
-            });
-
-            //   Then uncheck in a separate step
-            checkedInputs.forEach(input => {
-              input.checked = false;
-            });
-          }
-
-
-          if (!recalculatePrice({
-            priceContainers: document.querySelectorAll('.custom_price'),
-            cardPriceContainers: document.querySelectorAll('.card_custom_price'),
-            extraInput: document.querySelector('.customizer_additional_charges input'),
-          })) return;
+      returnToStylesFromMonogram();
+      const mainmonoli = document.querySelector('.adjut_monogram');
+      mainmonoli?.querySelector('.custom-title')?.classList.remove("hidden");
+      mainmonoli?.querySelector('.img')?.classList.add("hidden");
+      clearMonogramSelection();
     });
 
     mono_next_addons?.addEventListener("click", (e) => {
@@ -1935,46 +1889,9 @@
   hasOptions(restrictedOptionIds, restricted_option_Pid, selectedParentId, why_not_name)
 
     // UI selection visuals
-    const parentLi = document.querySelector(`li[data-id="${selectedParentId}"]`);
-    if (parentLi) {
-      parentLi.querySelector('.icon-check-circle')?.classList.add('active');
-      parentLi.querySelector('.selected')?.classList.remove('hidden');
-      parentLi.querySelector('.option-card')?.classList.add('select');
-
-      const parent_img = parentLi.querySelector('.select_img img');
-      const org_img = parentLi.querySelector('.org_img');
-
-      if (parent_img && org_img) {
-        org_img.classList.add('hidden');
-        parent_img.parentElement.classList.remove('hidden');
-        parent_img.onerror = () => {
-          parent_img.src = selectImg;
-        };
-        parent_img.src = selectImg;
-      }
-
-      const nameElement = parentLi.querySelector('.name');
-      const top = parentLi.querySelector('.top');
-      const bottom = parentLi.querySelector('.bottom');
-
-      if (nameElement && top && bottom) {
-        nameElement.innerHTML = selectOptions;
-        nameElement.classList.remove('hidden');
-        top.classList.remove('hidden');
-        bottom.classList.add('hidden');
-      }
-
-      parentLi.setAttribute('card-send', `[${card_send}]`);
-      parentLi.setAttribute('options-selected', `[${allselection}]`);
-      parentLi.setAttribute('summary-edit', `[${selectParent}]`);
-      parentLi.setAttribute('current-title', `[${currentTitle}]`);
-      parentLi.setAttribute('end-step', `[${endstep}]`);
-      parentLi.classList.add('selected_options');
-
-      if (typeof checkRequiredOptionsAndToggleButton === 'function') {
-        checkRequiredOptionsAndToggleButton();
-      }
-    }
+    applySelectionVisuals(document.querySelector(`li[data-id="${selectedParentId}"]`), {
+      selectImg, selectOptions, card_send, allselection, selectParent, currentTitle, endstep,
+    });
   //   // Price Update Logic
     recalculatePrice({
       priceContainers: document.querySelectorAll('.custom_price'),
@@ -2062,11 +1979,3 @@
     var popup = document.getElementById("myPopup");
     popup?.classList.toggle("show");
   }
-
-  // TIMING — end of synchronous execution. The number below is how long the
-  // main thread was blocked by this script after it was injected.
-  console.timeEnd('[customizer] option-card.js execution');
-  console.log(
-    `[customizer] option-card.js blocked main thread for ` +
-      `${(performance.now() - __optionCardT0).toFixed(1)}ms`
-  );

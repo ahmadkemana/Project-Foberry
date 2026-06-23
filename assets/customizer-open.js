@@ -84,7 +84,8 @@ document.addEventListener("DOMContentLoaded", function () {
       //  buttons. Pull the heavy child option lists (.customizer-list.childs-list
       //  — thousands of collection <li>s, the part that froze the UI) OUT of the
       //  template before injecting so they don't get cloned/laid out up front.
-      //  They are streamed back in during idle, after phase 1 has painted.
+      //  Each one is injected on demand, per step, when its style is clicked
+      //  (see injectChildList / option-card.js getnewList).
       const deferredChildLists = Array.from(
         template.content.querySelectorAll(".customizer-list.childs-list")
       );
@@ -292,14 +293,20 @@ document.addEventListener("DOMContentLoaded", function () {
     }, 200);
   });
 
-  //  RESIZE & SCROLL FIX
-  ["scroll", "resize"].forEach((evt) => {
-    window.addEventListener(evt, () => {
-      if (modal && modal.style.display === "flex") {
-        window.adjustModal();
-      }
+  //  RESIZE & SCROLL FIX — coalesce into a single adjust per frame. adjustModal
+  //  reads offsetHeight (forced layout) and writes styles, so running it on every
+  //  raw scroll/resize event thrashes layout; rAF batches it to once per frame.
+  let adjustScheduled = false;
+  function scheduleAdjust() {
+    if (adjustScheduled || !modal || modal.style.display !== "flex") return;
+    adjustScheduled = true;
+    requestAnimationFrame(() => {
+      adjustScheduled = false;
+      if (modal.style.display === "flex") window.adjustModal();
     });
-  });
+  }
+  window.addEventListener("scroll", scheduleAdjust, { passive: true });
+  window.addEventListener("resize", scheduleAdjust);
 });
 
 // additional options (delegated — .card-stack is injected lazily)
@@ -313,40 +320,20 @@ document.addEventListener('click', function (e) {
   const thrid = cardStack.querySelector('.thrid');
   const scrollParent = cardStack.closest(".overview-list");
   if (contrastOptions.length <= 3 || !makeSelections.length) return;
-  const delayPerItem = 0;
   // State based on 4th element (first 3 always visible)
   const isShowing = contrastOptions[3].classList.contains('hidden');
-  if (isShowing) {
-    // SHOW
-    contrastOptions.forEach((el, index) => {
-      if (index < 3) {
-        // first 3 → only toggle "show", never hidden
-        setTimeout(() => {
-          el.classList.add('show');
-        }, index * delayPerItem);
-      } else {
-        setTimeout(() => {
-          el.classList.remove('hidden');
-          el.classList.add('show');
-        }, (index - 3) * delayPerItem + 3 * delayPerItem);
-      }
-    });
-  } else {
-    // HIDE
-    contrastOptions.forEach((el, index) => {
-      if (index < 3) {
-        // first 3 → only remove "show", never hidden
-        setTimeout(() => {
-          el.classList.remove('show');
-        }, index * (delayPerItem / 2));
-      } else {
-        setTimeout(() => {
-          el.classList.remove('show');
-          el.classList.add('hidden');
-        }, (index - 3) * (delayPerItem / 2));
-      }
-    });
-  }
+  //   The first 3 cards are always visible (only toggle "show"); the rest also
+  //   toggle "hidden". The reveal used to be staggered, but the per-item delay is
+  //   0, so apply the classes directly instead of spawning a timer per card.
+  contrastOptions.forEach((el, index) => {
+    if (isShowing) {
+      if (index >= 3) el.classList.remove('hidden');
+      el.classList.add('show');
+    } else {
+      el.classList.remove('show');
+      if (index >= 3) el.classList.add('hidden');
+    }
+  });
   // Toggle button state
   cardStack.classList.toggle('active', isShowing);
   makeSelections[0].textContent = isShowing ? 'HIDE' : 'SHOW MORE';
