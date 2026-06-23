@@ -152,7 +152,7 @@
   //   applySelections (user picks an option) and handleloadprevious (restoring a
   //   saved selection) — both produced this identical block.
   function applySelectionVisuals(parentLi, {
-    selectImg, selectOptions, card_send, allselection, selectParent, currentTitle, endstep,
+    selectImg, selectOptions, card_send, allselection, selectParent, currentTitle, endstep, moreCharges,
   }) {
     if (!parentLi) return;
     parentLi.querySelector('.icon-check-circle')?.classList.add('active');
@@ -183,6 +183,13 @@
     parentLi.setAttribute('current-title', `[${currentTitle}]`);
     parentLi.setAttribute('end-step', `[${endstep}]`);
     parentLi.classList.add('selected_options');
+    //   Persist the selection's price charge on the parent card so the total
+    //   survives the child list being removed from the DOM after Apply.
+    if (moreCharges != null && moreCharges !== '') {
+      parentLi.setAttribute('applied-charge', moreCharges);
+    } else {
+      parentLi.removeAttribute('applied-charge');
+    }
     if (typeof checkRequiredOptionsAndToggleButton === 'function') {
       checkRequiredOptionsAndToggleButton();
     }
@@ -213,6 +220,7 @@
     // --- UI selection visuals ---
     applySelectionVisuals(getOptionItemById(selectedParentId), {
       selectImg, selectOptions, card_send, allselection, selectParent, currentTitle, endstep,
+      moreCharges: input.getAttribute('more-charges'),
     });
     //   Mark this input as applied
     input.setAttribute('data-applied', 'true');
@@ -220,6 +228,13 @@
     // Disable Apply until user changes again
     this.classList.add('disabled');
     delete this.dataset.lastSelected;
+    //   The choice is now captured on the parent card (incl. its charge), so free
+    //   the heavy child-list DOM. It re-injects from the template if the user
+    //   edits this step. Then recompute the price from the parent cards.
+    if (typeof window.__removeCustomizerChildLists === 'function') {
+      window.__removeCustomizerChildLists();
+    }
+    schedulePriceUpdate();
   }
   // --- Remove Applied Selection by ID ---
   function removeAppliedSelectionById(inputId) {
@@ -234,6 +249,7 @@
       parentLi.removeAttribute('summary-edit');
       parentLi.removeAttribute('current-title');
       parentLi.removeAttribute('end-step');
+      parentLi.removeAttribute('applied-charge');
       parentLi.querySelector('.icon-check-circle')?.classList.remove('active');
       parentLi.querySelector('.selected')?.classList.add('hidden');
       parentLi.querySelector('.option-card')?.classList.remove('select');
@@ -272,7 +288,21 @@
 
   function getCheckedRadioCharges() {
     let charges = 0;
+    //   Applied style/contrast selections store their charge on the parent card,
+    //   because the child list (and its radio) is removed from the DOM on Apply.
+    const appliedParents = new Set();
+    document.querySelectorAll('li.selected_options[applied-charge]').forEach(li => {
+      appliedParents.add(li.getAttribute('data-id'));
+      const charge = parseFloat(li.getAttribute('applied-charge'));
+      if (!isNaN(charge)) charges += charge;
+    });
+    //   Live checked charged radios. This previews a style/contrast charge as soon
+    //   as the option is ticked (before Apply). Skip a leaf radio whose parent is
+    //   already applied — that charge is counted above via the parent card, so
+    //   counting the live radio too (e.g. while editing) would double-charge.
     document.querySelectorAll('input[type="radio"]:checked[more-charges]').forEach(checkedInput => {
+      const mainParent = checkedInput.getAttribute('data-main-parent');
+      if (mainParent && appliedParents.has(mainParent)) return;
       const charge = parseFloat(checkedInput.getAttribute('more-charges'));
       if (!isNaN(charge)) charges += charge;
     });
@@ -1340,6 +1370,14 @@
       // 1. Remove "select" class from all option cards
       main_tab.querySelectorAll('a.select').forEach(a => a.classList.remove('select'));
 
+      //   Clear applied selections + their stored charges so the price resets to
+      //   base (child-list radios may be detached, so clear the parent cards too).
+      document.querySelectorAll('li.selected_options').forEach(li => {
+        li.classList.remove('selected_options');
+        li.removeAttribute('applied-charge');
+      });
+      appliedRadioInputs.clear();
+
       // 2. Remove all 'hasdisabled' classes
       document.querySelectorAll('li').forEach(li => li.classList.remove('hasdisabled'));
 
@@ -1892,6 +1930,7 @@
     // UI selection visuals
     applySelectionVisuals(document.querySelector(`li[data-id="${selectedParentId}"]`), {
       selectImg, selectOptions, card_send, allselection, selectParent, currentTitle, endstep,
+      moreCharges: input.getAttribute('more-charges'),
     });
   //   // Price Update Logic
     recalculatePrice({

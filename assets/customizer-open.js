@@ -99,49 +99,56 @@ document.addEventListener("DOMContentLoaded", function () {
         `phase 1 injected (${deferredChildLists.length} child lists deferred)`
       );
 
+      //  The child-list <ul>s are kept referenced for the page's lifetime (in
+      //  deferredChildLists) so they can be attached on demand AND detached again
+      //  after Apply, then re-attached if the user edits that step. Attached state
+      //  is tracked via node.isConnected rather than by mutating the array.
+      const overviewOf = () => parent.querySelector(".overview");
+
       //  Inject ONE child list <ul> on demand, matched by its childsIn class
       //  ("styles"/"contrasts") + data-index, into its original spot inside
       //  .overview. option-card.js calls this from getnewList the moment a style
       //  li[data-list] is clicked, so each step's heavy cards are materialized
       //  only when that step is actually opened.
-      const overviewOf = () => parent.querySelector(".overview");
       function injectChildList(childsIn, index) {
-        if (!deferredChildLists.length) return;
         const overview = overviewOf();
         if (!overview) return;
         const idx = String(index);
-        for (let k = deferredChildLists.length - 1; k >= 0; k--) {
-          const ul = deferredChildLists[k];
+        deferredChildLists.forEach((ul) => {
           if (
+            !ul.isConnected &&
             ul.classList.contains(childsIn) &&
             ul.getAttribute("data-index") === idx
           ) {
-            const cStart = performance.now();
             overview.appendChild(ul);
-            deferredChildLists.splice(k, 1);
-            console.log(
-              `[customizer] child list .${childsIn}[data-index="${idx}"] injected: ` +
-                `${(performance.now() - cStart).toFixed(1)}ms`
-            );
           }
-        }
+        });
       }
 
-      //  Inject every remaining child list at once — for flows that touch all
+      //  Inject every detached child list at once — for flows that touch all
       //  lists without going step-by-step (load-previous, summary "Edit").
       function injectAllChildLists() {
-        if (!deferredChildLists.length) return;
         const overview = overviewOf();
         if (!overview) return;
         const frag = document.createDocumentFragment();
-        deferredChildLists.forEach((list) => frag.appendChild(list));
-        overview.appendChild(frag);
-        deferredChildLists.length = 0;
-        console.log("[customizer] all remaining child lists injected");
+        deferredChildLists.forEach((ul) => {
+          if (!ul.isConnected) frag.appendChild(ul);
+        });
+        if (frag.childNodes.length) overview.appendChild(frag);
+      }
+
+      //  Detach every currently-attached child list (called after Apply once the
+      //  choice is captured on the parent card). Nodes stay referenced, so the
+      //  inject functions can re-attach them when the user edits that step.
+      function removeAllChildLists() {
+        deferredChildLists.forEach((ul) => {
+          if (ul.isConnected) ul.remove();
+        });
       }
 
       window.__injectCustomizerChildList = injectChildList;
       window.__injectCustomizerChildLists = injectAllChildLists;
+      window.__removeCustomizerChildLists = removeAllChildLists;
 
       patchReadyListeners();
       const stylesReady = waitForInjectedStyles(parent);
