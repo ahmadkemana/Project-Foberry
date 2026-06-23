@@ -313,50 +313,48 @@ document.addEventListener("DOMContentLoaded", function () {
 document.addEventListener('click', function (e) {
   const cardStack = e.target.closest('.card-stack');
   if (!cardStack) return;
+
   const contrastOptions = document.querySelectorAll('.overview-list.style-list .contrast-options');
   const makeSelections = document.querySelectorAll('.card-stack-text');
-  const optionCard = cardStack.querySelector('.option-card');
-  const second = cardStack.querySelector('.second');
-  const thrid = cardStack.querySelector('.thrid');
-  const scrollParent = cardStack.closest(".overview-list");
   if (contrastOptions.length <= 3 || !makeSelections.length) return;
-  // State based on 4th element (first 3 always visible)
+
+  // State based on 4th element (first 3 are always visible).
   const isShowing = contrastOptions[3].classList.contains('hidden');
-  //   The first 3 cards are always visible (only toggle "show"); the rest also
-  //   toggle "hidden". The reveal used to be staggered, but the per-item delay is
-  //   0, so apply the classes directly instead of spawning a timer per card.
+
+  //   First 3 cards only toggle "show"; the rest also toggle "hidden".
   contrastOptions.forEach((el, index) => {
-    if (isShowing) {
-      if (index >= 3) el.classList.remove('hidden');
-      el.classList.add('show');
-    } else {
-      el.classList.remove('show');
-      if (index >= 3) el.classList.add('hidden');
-    }
+    el.classList.toggle('show', isShowing);
+    if (index >= 3) el.classList.toggle('hidden', !isShowing);
   });
-  // Toggle button state
+
   cardStack.classList.toggle('active', isShowing);
   makeSelections[0].textContent = isShowing ? 'HIDE' : 'SHOW MORE';
-  if (window.innerWidth < 450 && optionCard) {
-    if (second) second.style.display = isShowing ? 'none' : 'block';
-    if (thrid) thrid.style.display = isShowing ? 'none' : 'block';
-    if (scrollParent) {
-      if (isShowing) {
-        // scroll to bottom after small delay (optional)
-        setTimeout(() => {
-          scrollParent.scrollTo({
-            top: scrollParent.scrollHeight,
-            behavior: 'smooth'
-          });
-        }, 500); // <-- delay in milliseconds
-      }
-    }
-    optionCard.style.width = isShowing ? '100%' : '80%';
-    optionCard.style.transition = 'width 0.3s ease';
-  }
+
+  const SHOW_BG = '#4eb74e';
+  const HIDE_BG = 'linear-gradient(0deg,rgba(112, 112, 112, 1) 0%, rgba(20, 21, 22, 1) 40%)';
   makeSelections.forEach(el => {
-    el.style.background = isShowing
-      ? '#4eb74e'
-      : 'linear-gradient(0deg,rgba(112, 112, 112, 1) 0%, rgba(20, 21, 22, 1) 40%)';
+    el.style.background = isShowing ? SHOW_BG : HIDE_BG;
   });
+
+  //   Mobile-only width/scroll tweaks — only query these nodes when on mobile.
+  const optionCard = window.innerWidth < 450 ? cardStack.querySelector('.option-card') : null;
+  if (!optionCard) return;
+
+  const second = cardStack.querySelector('.second');
+  const thrid = cardStack.querySelector('.thrid');
+  if (second) second.style.display = isShowing ? 'none' : 'block';
+  if (thrid) thrid.style.display = isShowing ? 'none' : 'block';
+
+  if (isShowing) {
+    const scrollParent = cardStack.closest('.overview-list');
+    // scroll to bottom after a small delay (optional)
+    if (scrollParent) {
+      setTimeout(() => {
+        scrollParent.scrollTo({ top: scrollParent.scrollHeight, behavior: 'smooth' });
+      }, 500);
+    }
+  }
+
+  optionCard.style.width = isShowing ? '100%' : '80%';
+  optionCard.style.transition = 'width 0.3s ease';
 });
