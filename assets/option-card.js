@@ -518,7 +518,7 @@
   // Handle childs option on click
   document.addEventListener('click', function (e) {
     const clickedLi = e.target.closest('li[data-list]');
-    const info = e.target.matches('.info_btn');
+    const info = e.target.closest('.info_btn');
     const modal_dialog = e.target.matches('.modal') || e.target.closest('.modal');
     const close_btn = e.target.matches('.close_btn');
 
@@ -697,8 +697,12 @@
 
       const currentUL = document.querySelector(`.${currentListClass}[data-index="${currentIndex}"]`);
       if (currentUL) {
-        currentUL.classList.add('hidden');
+        //   Leaving this step without applying (any unapplied pick was already
+        //   cleared by clearLastSelected): remove its heavy list from the DOM,
+        //   same as after Apply. It re-injects from the template if the user
+        //   navigates back into it.
         currentUL.classList.remove('openchilds');
+        currentUL.remove();
       }
 
       //   Safety: the previous step was injected on the way forward, but make
@@ -724,7 +728,12 @@
           nextToSizeBtn?.classList.remove('hidden');
           apply_btn?.classList.add('hidden');
           currently_open_option?.classList.add('hidden');
-          // currently_open_option.innerHTML = ""; 
+          // currently_open_option.innerHTML = "";
+          //   Back at the main style list — free any child lists still in the DOM,
+          //   same as after Apply (they re-inject when a step is opened again).
+          if (typeof window.__removeCustomizerChildLists === 'function') {
+            window.__removeCustomizerChildLists();
+          }
         }
       }
     });
@@ -1961,57 +1970,56 @@
     });
   });
 
-  // info popup open 
-  document.querySelectorAll('.info_btn').forEach(button => {
-    button.addEventListener('click', () => {
+  // info popup open (delegated — .info_btn lives inside lazily-injected child lists,
+  // so binding per-element at init would miss them)
+  document.addEventListener('click', function (e) {
+    const button = e.target.closest('.info_btn');
+    if (!button) return;
 
-      const targetId = button.getAttribute('data-target')?.replace('#', '');
+    const targetId = button.getAttribute('data-target')?.replace('#', '');
 
-      document.querySelectorAll('.modal').forEach(modal => {
-        if (modal.id === targetId) {
+    document.querySelectorAll('.modal').forEach(modal => {
+      if (modal.id === targetId) {
 
-          //   Append the matched modal into the .info-popup element
-          const infoPopup = document.querySelector('.info-popup');
-          if (infoPopup && !infoPopup.contains(modal)) {
-            infoPopup.appendChild(modal);
-          }
-
-          modal.classList.add('show');
-        } else {
-          modal.classList.remove('show');
+        //   Append the matched modal into the .info-popup element
+        const infoPopup = document.querySelector('.info-popup');
+        if (infoPopup && !infoPopup.contains(modal)) {
+          infoPopup.appendChild(modal);
         }
-      });
 
-      const stopscroll = document.querySelector('.customizer_content .product_form_wrapper');
-      if (stopscroll) {
-        stopscroll.style.overflow = "hidden";
+        modal.classList.add('show');
+      } else {
+        modal.classList.remove('show');
       }
+    });
 
-      const adjust_height = document.querySelectorAll('.openchilds');
-      adjust_height.forEach(el => {
-        el.style.maxHeight = "none";
-        el.style.overflow = "hidden";
-      });
+    const stopscroll = document.querySelector('.customizer_content .product_form_wrapper');
+    if (stopscroll) {
+      stopscroll.style.overflow = "hidden";
+    }
+
+    const adjust_height = document.querySelectorAll('.openchilds');
+    adjust_height.forEach(el => {
+      el.style.maxHeight = "none";
+      el.style.overflow = "hidden";
     });
   });
-  // Handle close button to hide modal
-  document.querySelectorAll('.close, .close_btn,.modal.fade').forEach(closeBtn => {
-    closeBtn.addEventListener('click', () => {
-      const targetId = closeBtn.getAttribute('data-target')?.replace('#', '');
+  // Handle close button to hide modal (delegated — close buttons / modals are
+  // injected lazily inside child lists)
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest('.close, .close_btn, .modal.fade')) return;
 
-      document.querySelectorAll('.modal').forEach(modal => {
-        if (modal.id === targetId) {
-        }
-          modal.classList.remove('show'); // Remove 'show' from matched modal
-            const stopscroll = document.querySelector('.customizer_content .product_form_wrapper')
-            const stopscroll1 = document.querySelector('.modal.fade')
-      if (stopscroll) stopscroll.style.overflow = "auto"
-      });
-        const adjust_height = document.querySelectorAll('.openchilds');
-  adjust_height.forEach(el => {
-    el.style.maxHeight = "max-content"; // use maxHeight (camelCase) and "none" instead of "auto"
-    el.style.overflow = "auto"; // use maxHeight (camelCase) and "none" instead of "auto"
-  });
+    document.querySelectorAll('.modal').forEach(modal => {
+      modal.classList.remove('show'); // Remove 'show' from every modal
+    });
+
+    const stopscroll = document.querySelector('.customizer_content .product_form_wrapper');
+    if (stopscroll) stopscroll.style.overflow = "auto";
+
+    const adjust_height = document.querySelectorAll('.openchilds');
+    adjust_height.forEach(el => {
+      el.style.maxHeight = "max-content";
+      el.style.overflow = "auto";
     });
   });
   // open and close size guide popup
