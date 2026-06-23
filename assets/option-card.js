@@ -1385,6 +1385,10 @@
         li.classList.remove('selected_options');
         li.removeAttribute('applied-charge');
       });
+      //   Uncheck the applied radios — they may live in child lists that were
+      //   removed from the DOM, so getAllChildTabs() below can't reach them; the
+      //   Set still holds the element references even while detached.
+      appliedRadioInputs.forEach(input => { input.checked = false; });
       appliedRadioInputs.clear();
 
       // 2. Remove all 'hasdisabled' classes
