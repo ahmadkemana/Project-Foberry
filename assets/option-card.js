@@ -129,17 +129,19 @@
       schedulePriceUpdate();
       return;
     }
-
-    const apply_btn = document.querySelector('.apply_btn');
-    // Enable Apply button
-    apply_btn?.classList.remove('disabled');
-    // Store selected input ID (not value)
     if (!apply_btn) return;
+    // Enable Apply and store the selected input ID (not value)
+    apply_btn.classList.remove('disabled');
     apply_btn.dataset.lastSelected = input.id;
-    // Uncheck all related inputs first
-    getInputsByMainParent(data_main_parent).forEach(el => {
-      if (el !== input) el.checked = false;
-    });
+    //   Uncheck only the *other currently-checked* radio in this group. Collection
+    //   options can render thousands of radios per group, so querying just the
+    //   ":checked" ones (usually a single element) is far cheaper than looping the
+    //   whole cached group and writing .checked on every member.
+    document
+      .querySelectorAll(`input[data-main-parent="${escapeAttrValue(data_main_parent)}"]:checked`)
+      .forEach(el => {
+        if (el !== input) el.checked = false;
+      });
     if (prev_tab?.classList.contains('summary-page')) {
       apply_btn.classList.remove('hidden');
       nextToSizeBtn?.classList.add('hidden');
@@ -203,7 +205,6 @@
     const why_not_name = input.getAttribute('style_name');
     const restrictedOptionIdsStr = input.getAttribute('restricted_option_ids');
     const restricted_option_Pid = input.getAttribute('restricted_option_Pid');
-    const has_depended = input.getAttribute('has-depended');
     // --- Restriction logic ---
     const restrictedOptionIds = restrictedOptionIdsStr
       ? restrictedOptionIdsStr.replace(/[\[\]\s"]/g, '').split(',')
