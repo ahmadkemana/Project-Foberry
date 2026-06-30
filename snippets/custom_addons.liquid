@@ -10,7 +10,7 @@
   <div class="inner_addons">
   {% comment %}
     {% endcomment %}
-  <div class="product-orignal-price hidden" data-price-value="{{ product.price | money }}">{{ product.price | money }}</div>
+  <div class="product-orignal-price hidden" data-price-value="{{ product.price }}">{{ product.price | money }}</div>
     
   <div class="addons_heading"><span class="icon-img"><img src="https://cdn.shopify.com/s/files/1/0733/9101/4200/files/Gemini_Generated_Image_29vhm829vhm829vh.png?v=1776535918" > </span> <p>Customizations</p><span>(Optional)</span></div>
     {%  for option in product_data.options %}

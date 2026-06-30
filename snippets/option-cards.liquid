@@ -114,7 +114,7 @@
                 or option.has_additional_charges == 1
                 and option.additional_charges != null
               %}
-                <span class="additional_charges">+Rs{{ option.additional_charges }} </span>
+                <span class="additional_charges">+${{ option.additional_charges }} </span>
               {% endif %}
               <div class="scroll-wrapper">
                 <span class="title bottom">{{ option.label }}</span>
@@ -213,7 +213,7 @@
               or monogram_options.has_additional_cost == 1
               and monogram_options.additional_cost != null
             %}
-              <span class="additional_charges">+Rs{{ monogram_options.additional_cost }} </span>
+              <span class="additional_charges">+${{ monogram_options.additional_cost }} </span>
             {% endif %}
             <span class="selection">
               <span class="make-selection">MAKE SELECTION</span>

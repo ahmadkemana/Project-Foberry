@@ -78,7 +78,7 @@
                 or price.has_additional_cost == 1
                 and price.additional_cost != null
               %}
-                <span class="additional_charges ">+{{ price.additional_cost }}PKR </span>
+                <span class="additional_charges ">+${{ price.additional_cost }} </span>
               {% endif %} {% endcomment %}
               <div class="selection">
                 <span class="name">{{ font_options.label }}</span>
@@ -110,7 +110,7 @@
                 or color_option.has_additional_charges == 1
                 and color_option.additional_charges != null
               %}
-                <span class="additional_charges">+{{ color_option.additional_charges }} PKR</span>
+                <span class="additional_charges">+${{ color_option.additional_charges }}</span>
               {% endif %}
               <div class="selection">
                 <span class="name">{{ color_option.label }}</span>
@@ -175,7 +175,7 @@
               </div>
 
               {% if position.additional_charges != 'undefined' and position.additional_charges != 'null' %}
-                <span class="additional_charges">+{{ position.additional_charges }} PKR</span>
+                <span class="additional_charges">+${{ position.additional_charges }}</span>
               {% endif %}
 
               {% if position.has_dependent_options == '1' or position.has_dependent_options == 1 %}

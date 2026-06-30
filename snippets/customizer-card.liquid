@@ -48,7 +48,7 @@
       {% endif %}
     </span>
   {% if option.has_additional_charges == '1' or option.has_additional_charges == 1 and option.additional_charges != null %}
-      <span class="additional_charges">+Rs{{ option.additional_charges }} </span>
+      <span class="additional_charges">+${{ option.additional_charges }} </span>
     {% endif %}
     {% if option.has_additional_details == '1' or option.has_additional_details == 1 %}
           <div class="product_info">
@@ -204,7 +204,7 @@ end-step="{{steps}}"
 <span class="why_not  "> Choose {{ has_depended_label }} for this option</span>
       </div>
     {% if option.has_additional_charges == '1' or option.has_additional_charges == 1 and option.additional_charges != null %}
-      <span class="additional_charges">+Rs{{ option.additional_charges }} </span>
+      <span class="additional_charges">+${{ option.additional_charges }} </span>
     {% endif %}
    {% if option.has_additional_details == '1' or option.has_additional_details == 1 %}
            <div class="product_info">

@@ -422,7 +422,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const totalInRupees = basePriceInRupees + extraChargesRupees;
 
     // ✅ update UI
-    totalPriceElement.textContent = 'Rs.' + totalInRupees.toLocaleString('en-PK', {
+    totalPriceElement.textContent = '$' + totalInRupees.toLocaleString('en-US', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     });
@@ -431,7 +431,7 @@ document.addEventListener('DOMContentLoaded', function () {
     totalPriceElement.setAttribute('data-price-value', updatedPaisa);
 
     if (additional_charges_addons) {
-      additional_charges_addons.value = `${extraChargesRupees.toFixed(0)} PKR`;
+      additional_charges_addons.value = `$${extraChargesRupees.toFixed(0)}`;
     }
   }
 
@@ -543,7 +543,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // ✅ total calculation
     const totalInRupees = basePriceInRupees + extraChargesRupees;
 
-    totalPriceElement.textContent = 'Rs.' + totalInRupees.toLocaleString('en-PK', {
+    totalPriceElement.textContent = '$' + totalInRupees.toLocaleString('en-US', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     });
@@ -552,7 +552,7 @@ document.addEventListener('DOMContentLoaded', function () {
     totalPriceElement.setAttribute('data-price-value', updatedPaisa);
 
     if (additional_charges_addons) {
-      additional_charges_addons.value = `${extraChargesRupees.toFixed(0)} PKR`;
+      additional_charges_addons.value = `$${extraChargesRupees.toFixed(0)}`;
     }
   }
 
@@ -586,7 +586,7 @@ document.addEventListener('DOMContentLoaded', function () {
       if (input.checked) {
         labelTxt.style.background = "black";
         labelTxt.style.color = "white";
-        if (targetEl) targetEl.innerHTML = `${targetLabel} | Rs.${targetPrice}.00`;
+        if (targetEl) targetEl.innerHTML = `${targetLabel} | $${targetPrice}.00`;
       } else {
         labelTxt.style.background = "";
         labelTxt.style.color = "";
