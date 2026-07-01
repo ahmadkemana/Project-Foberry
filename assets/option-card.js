@@ -281,8 +281,13 @@
   function getBasePrice(priceContainers = customPriceContainers) {
     if (priceContainers.length === 0) return null;
     const basePriceAttr = priceContainers[0].getAttribute('default-price');
-    const basePriceStr = basePriceAttr?.replace(/Rs\./i, '').replace(/,/g, '').trim();
-    const basePrice = parseFloat(basePriceStr);
+    //   Pull the numeric amount out of the formatted money string regardless of the
+    //   currency symbol / spacing — handles "Rs 5,000.00", "Rs. 5,000", "₨5,000.00",
+    //   etc. The old code stripped a literal "Rs." and so missed the period-less
+    //   "Rs " format, leaving parseFloat() with NaN — which made recalculatePrice()
+    //   bail and never add option charges to the total.
+    const amountMatch = basePriceAttr?.match(/\d[\d,]*(?:\.\d+)?/);
+    const basePrice = amountMatch ? parseFloat(amountMatch[0].replace(/,/g, '')) : NaN;
     return isNaN(basePrice) ? null : basePrice;
   }
 
