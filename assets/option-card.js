@@ -281,8 +281,13 @@
   function getBasePrice(priceContainers = customPriceContainers) {
     if (priceContainers.length === 0) return null;
     const basePriceAttr = priceContainers[0].getAttribute('default-price');
-    const basePriceStr = basePriceAttr?.replace(/Rs\./i, '').replace(/,/g, '').trim();
-    const basePrice = parseFloat(basePriceStr);
+    //   Pull the numeric amount out of the formatted money string regardless of the
+    //   currency symbol / spacing — handles "Rs 5,000.00", "Rs. 5,000", "₨5,000.00",
+    //   etc. The old code stripped a literal "Rs." and so missed the period-less
+    //   "Rs " format, leaving parseFloat() with NaN — which made recalculatePrice()
+    //   bail and never add option charges to the total.
+    const amountMatch = basePriceAttr?.match(/\d[\d,]*(?:\.\d+)?/);
+    const basePrice = amountMatch ? parseFloat(amountMatch[0].replace(/,/g, '')) : NaN;
     return isNaN(basePrice) ? null : basePrice;
   }
 
@@ -321,7 +326,7 @@
     const cardTotalText = totalCharges.toLocaleString();
 
     priceContainers.forEach(container => {
-      container.innerHTML = `<span>Total: Rs ${totalText}</span>`;
+      container.innerHTML = `<span>Total: $ ${totalText}</span>`;
       if (setAllAttrs) {
         container.setAttribute("customizer-mono-price", monoCharges.toFixed());
         container.setAttribute("total-price", cardTotalText);
@@ -1452,16 +1457,12 @@
       document.querySelector(".commonly")?.classList.remove("hidden");
       document.querySelector(".specific_mono")?.classList.add("hidden");
       document.querySelector(".custom_monogram")?.classList.add("hidden");
-  const priceContainers = document.querySelectorAll('.custom_price');
-  let basePriceAttr = priceContainers[0].getAttribute('default-price');
-  // Remove Rs, commas, and spaces → then parse
-  let basePrice = parseFloat(
-    basePriceAttr.replace(/Rs\.?/i, "").replace(/,/g, "").trim()
-  );
-  priceContainers.forEach(container => {
-    // Format back with commas
-    container.innerHTML = `<span>Total: Rs ${basePrice.toLocaleString()}</span>`;
-  });
+      //   Every selection was cleared above, so recompute the total from scratch.
+      //   Reuse recalculatePrice/getBasePrice, which extracts the amount from any
+      //   money format ("Rs 5,000", "$5,000.00", other currencies). The old inline
+      //   parse only stripped a literal "Rs"/"Rs." and returned NaN for anything
+      //   else, so the total rendered as "$ NaN" after Start Again.
+      updatePrice();
     });
   });
   // reselection of option through Edit btn
@@ -1717,7 +1718,7 @@
     quantityInput.value = quantity; //   Correct for input
     const totalPrice = basePrice * quantity;
     const formattedPrice = totalPrice.toLocaleString('en-PK');
-    priceContainer.querySelector('span').textContent = `PK. ${formattedPrice}`;
+    priceContainer.querySelector('span').textContent = `$. ${formattedPrice}`;
   }
 
   let quantity = parseInt(quantityInput?.value) || 1;
@@ -1836,7 +1837,7 @@
     alert('Selections saved for future order!');
   });
 
-  // load previous selection 
+  // load previous selection
   document.querySelectorAll('.load-button').forEach(button => {
     button.addEventListener('click', function () {
       const savedSelections = JSON.parse(localStorage.getItem('savedSelections'));
@@ -1846,131 +1847,155 @@
         return;
       }
 
-      const recheckinputs = document.querySelectorAll(
-        'input[type="radio"], input[type="checkbox"], input[type="text"], input[type="hidden"], input[type="number"], input[style_name]'
-      );
-      const sectionCards = document.querySelectorAll('a.option-card[style_name]');
-      //   Loading a saved selection reveals matching cards across every step, so
-      //   make sure all deferred child lists exist first.
-      if (typeof window.__injectCustomizerChildLists === 'function') {
-        window.__injectCustomizerChildLists();
+      //   Restoring a saved selection injects every deferred child list, restores
+      //   each saved input and recomputes the total in one synchronous pass — heavy
+      //   enough to visibly stall. Show the loader first, run the restore after the
+      //   spinner has painted, then hide it once every input is checked and the
+      //   total price has been updated.
+      showChildListLoader();
+
+      function handleloadprevious(event) {
+        const input = event.target;
+        const selectedParentId = input.getAttribute('data-main-parent');
+        const allselection = input.getAttribute('all-selection');
+        const selectOptions = input.getAttribute('select-options');
+        const card_send = input.getAttribute('card-send');
+        const selectParent = input.getAttribute('data-parent');
+        const currentTitle = input.getAttribute('current-title');
+        const endstep = input.getAttribute('end-step');
+        const selectImg = input.getAttribute('select-img');
+        const why_not_name = input.getAttribute('style_name');
+        const restrictedOptionIdsStr = input.getAttribute('restricted_option_ids');
+        const restricted_option_Pid = input.getAttribute('restricted_option_Pid');
+        const has_depended = input.getAttribute('has-depended');
+        const apply_btn = document.querySelector('.apply_btn');
+
+        apply_btn?.classList.remove('disabled');
+        // Parse restricted IDs into array
+        const restrictedOptionIds = restrictedOptionIdsStr
+          ? restrictedOptionIdsStr.replace(/[\[\]\s"]/g, '').split(',')
+          : [];
+        hasOptions(restrictedOptionIds, restricted_option_Pid, selectedParentId, why_not_name)
+
+        // UI selection visuals
+        applySelectionVisuals(document.querySelector(`li[data-id="${selectedParentId}"]`), {
+          selectImg, selectOptions, card_send, allselection, selectParent, currentTitle, endstep,
+          moreCharges: input.getAttribute('more-charges'),
+        });
+        //   // Price Update Logic
+        recalculatePrice({
+          priceContainers: document.querySelectorAll('.custom_price'),
+          cardPriceContainers: document.querySelectorAll('.card_custom_price'),
+          extraInput: document.querySelector('.customizer_additional_charges input'),
+          roundedTotal: true,
+          setAllAttrs: false,
+        });
       }
-      getAllChildTabs().forEach(tab => tab.classList.add('hidden'));
 
-      //   Highlight section headers if saved value found
-      sectionCards.forEach(section => {
-        const group = section.getAttribute('style_name');
-        const savedKey = `properties[${group}]`;
-        const savedValue = savedSelections[savedKey] || savedSelections[group];
-
-
-        if (savedValue) {
-          section.classList.add('select');
-          const showselect = section.querySelector('.selected');
-          if (showselect) {
-            showselect.classList.remove('hidden');
-          }
+      function loadPreviousSelections() {
+        //   Loading a saved selection reveals matching cards across every step, so
+        //   make sure all deferred child lists exist first. This MUST run before we
+        //   query the inputs below — most option radios live inside these lazily
+        //   injected lists, so querying first would miss them on the very first load
+        //   (they only appeared to restore on a second click, once the lists existed).
+        if (typeof window.__injectCustomizerChildLists === 'function') {
+          window.__injectCustomizerChildLists();
         }
-      });
+        const recheckinputs = document.querySelectorAll(
+          'input[type="radio"], input[type="checkbox"], input[type="text"], input[type="hidden"], input[type="number"], input[style_name]'
+        );
+        const sectionCards = document.querySelectorAll('a.option-card[style_name]');
+        getAllChildTabs().forEach(tab => tab.classList.add('hidden'));
 
-      //   Match inputs and apply saved values
-      recheckinputs.forEach(input => {
-        let group = '';
-        let value = '';
-        let savedKey = '';
-        let savedValue = '';
-
-        // Priority 1: all-selection
-        if (input.hasAttribute('all-selection')) {
-          const allSelection = input.getAttribute('all-selection');
-          if (!allSelection.includes(':')) return;
-          [group, value] = allSelection.split(':').map(s => s.trim());
-        }
-        // Priority 2: style_name + name
-        else if (input.hasAttribute('style_name') && input.name) {
-          group = input.name;
-          value = input.getAttribute('style_name');
-        }
-        // Priority 3: name + value (basic inputs like number/text)
-        else if (input.name && input.value !== undefined) {
-          group = input.name;
-          value = input.value;
-        }
-
-        if (!group) return;
-
-        savedKey = `properties[${group}]`;
-        savedValue = savedSelections[savedKey] || savedSelections[group]; //   fallback support
-
-        if (!savedValue) return;
+        //   Highlight section headers if saved value found
+        sectionCards.forEach(section => {
+          const group = section.getAttribute('style_name');
+          const savedKey = `properties[${group}]`;
+          const savedValue = savedSelections[savedKey] || savedSelections[group];
 
 
-        if (input.type === 'radio' || input.type === 'checkbox') {
-          if (savedValue.includes(value)) {
-            input.checked = true;
-            //   Trigger visual & logic updates
-            if (typeof handleloadprevious === 'function') {
-              handleloadprevious({ target: input });
+          if (savedValue) {
+            section.classList.add('select');
+            const showselect = section.querySelector('.selected');
+            if (showselect) {
+              showselect.classList.remove('hidden');
             }
           }
-        } else {
-          input.value = savedValue;
-        }
-      });
-      function handleloadprevious(event) {
-    const input = event.target;
-    const selectedParentId = input.getAttribute('data-main-parent');
-    const allselection = input.getAttribute('all-selection');
-    const selectOptions = input.getAttribute('select-options');
-    const card_send = input.getAttribute('card-send');
-    const selectParent = input.getAttribute('data-parent');
-    const currentTitle = input.getAttribute('current-title');
-    const endstep = input.getAttribute('end-step');
-    const selectImg = input.getAttribute('select-img');
-    const why_not_name = input.getAttribute('style_name');
-    const restrictedOptionIdsStr = input.getAttribute('restricted_option_ids');
-    const restricted_option_Pid = input.getAttribute('restricted_option_Pid');
-    const has_depended = input.getAttribute('has-depended');
-    const apply_btn = document.querySelector('.apply_btn');
-
-    apply_btn?.classList.remove('disabled');
-  // Parse restricted IDs into array
-    const restrictedOptionIds = restrictedOptionIdsStr
-      ? restrictedOptionIdsStr.replace(/[\[\]\s"]/g, '').split(',')
-      : [];
-  hasOptions(restrictedOptionIds, restricted_option_Pid, selectedParentId, why_not_name)
-
-    // UI selection visuals
-    applySelectionVisuals(document.querySelector(`li[data-id="${selectedParentId}"]`), {
-      selectImg, selectOptions, card_send, allselection, selectParent, currentTitle, endstep,
-      moreCharges: input.getAttribute('more-charges'),
-    });
-  //   // Price Update Logic
-    recalculatePrice({
-      priceContainers: document.querySelectorAll('.custom_price'),
-      cardPriceContainers: document.querySelectorAll('.card_custom_price'),
-      extraInput: document.querySelector('.customizer_additional_charges input'),
-      roundedTotal: true,
-      setAllAttrs: false,
-    });
-  }
-
-      //   Populate monogram_text into letter inputs
-      const monogramText = savedSelections['properties[monogram_text]'];
-      if (monogramText) {
-        const letterInputs = document.querySelectorAll('.letter-inputs input[name="mono"]');
-        const chars = monogramText.replace(/\s+/g, '').split('');
-
-        letterInputs.forEach((input, index) => {
-          input.value = chars[index] || '';
-                    const apply_mono_btn = document.querySelector(".apply_mono_btn");
-          apply_mono_btn?.click();
-          updatePreview()
         });
 
+        //   Match inputs and apply saved values
+        recheckinputs.forEach(input => {
+          let group = '';
+          let value = '';
+          let savedKey = '';
+          let savedValue = '';
+
+          // Priority 1: all-selection
+          if (input.hasAttribute('all-selection')) {
+            const allSelection = input.getAttribute('all-selection');
+            if (!allSelection.includes(':')) return;
+            [group, value] = allSelection.split(':').map(s => s.trim());
+          }
+          // Priority 2: style_name + name
+          else if (input.hasAttribute('style_name') && input.name) {
+            group = input.name;
+            value = input.getAttribute('style_name');
+          }
+          // Priority 3: name + value (basic inputs like number/text)
+          else if (input.name && input.value !== undefined) {
+            group = input.name;
+            value = input.value;
+          }
+
+          if (!group) return;
+
+          savedKey = `properties[${group}]`;
+          savedValue = savedSelections[savedKey] || savedSelections[group]; //   fallback support
+
+          if (!savedValue) return;
+
+
+          if (input.type === 'radio' || input.type === 'checkbox') {
+            if (savedValue.includes(value)) {
+              input.checked = true;
+              //   Trigger visual & logic updates
+              handleloadprevious({ target: input });
+            }
+          } else {
+            input.value = savedValue;
+          }
+        });
+
+        //   Populate monogram_text into letter inputs
+        const monogramText = savedSelections['properties[monogram_text]'];
+        if (monogramText) {
+          const letterInputs = document.querySelectorAll('.letter-inputs input[name="mono"]');
+          const chars = monogramText.replace(/\s+/g, '').split('');
+
+          letterInputs.forEach((input, index) => {
+            input.value = chars[index] || '';
+            const apply_mono_btn = document.querySelector(".apply_mono_btn");
+            apply_mono_btn?.click();
+            updatePreview()
+          });
+
+        }
       }
 
-      alert('Previous selection loaded!');
+      //   Double rAF: the first frame lets the browser paint the loader, the second
+      //   runs the heavy restore so the spinner is actually visible while it works.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        try {
+          loadPreviousSelections();
+          //   Final recompute once every restored input is checked, so the total
+          //   price reflects the fully-loaded selection before the loader hides.
+          updatePrice();
+        } finally {
+          hideChildListLoader();
+        }
+
+        alert('Previous selection loaded!');
+      }));
     });
   });
 
