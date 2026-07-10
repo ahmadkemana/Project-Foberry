@@ -293,22 +293,28 @@
 
   function getCheckedRadioCharges() {
     let charges = 0;
-    //   Applied style/contrast selections store their charge on the parent card,
-    //   because the child list (and its radio) is removed from the DOM on Apply.
-    const appliedParents = new Set();
-    document.querySelectorAll('li.selected_options[applied-charge]').forEach(li => {
-      appliedParents.add(li.getAttribute('data-id'));
-      const charge = parseFloat(li.getAttribute('applied-charge'));
-      if (!isNaN(charge)) charges += charge;
-    });
-    //   Live checked charged radios. This previews a style/contrast charge as soon
-    //   as the option is ticked (before Apply). Skip a leaf radio whose parent is
-    //   already applied — that charge is counted above via the parent card, so
-    //   counting the live radio too (e.g. while editing) would double-charge.
+    //   A live checked radio reflects the CURRENT selection — including while
+    //   editing an already-applied step, where the user may have just picked a
+    //   different option than the one captured on the parent card. Count these
+    //   first and remember which parents they cover.
+    const parentsWithLiveRadio = new Set();
     document.querySelectorAll('input[type="radio"]:checked[more-charges]').forEach(checkedInput => {
       const mainParent = checkedInput.getAttribute('data-main-parent');
-      if (mainParent && appliedParents.has(mainParent)) return;
+      if (mainParent) parentsWithLiveRadio.add(mainParent);
       const charge = parseFloat(checkedInput.getAttribute('more-charges'));
+      if (!isNaN(charge)) charges += charge;
+    });
+    //   Applied style/contrast selections store their charge on the parent card,
+    //   because the child list (and its radio) is removed from the DOM on Apply.
+    //   Count a parent's stored charge ONLY when it has no live radio in the DOM.
+    //   If a live radio exists (e.g. mid-edit, the step is re-injected), it already
+    //   accounts for that parent AND reflects the new pick — so using the stale
+    //   stored charge instead would both double-count and ignore the change
+    //   ("total price not updating after changing an edited option").
+    document.querySelectorAll('li.selected_options[applied-charge]').forEach(li => {
+      const parentId = li.getAttribute('data-id');
+      if (parentId && parentsWithLiveRadio.has(parentId)) return;
+      const charge = parseFloat(li.getAttribute('applied-charge'));
       if (!isNaN(charge)) charges += charge;
     });
     return charges;
@@ -334,7 +340,7 @@
     });
 
     cardPriceContainers.forEach(container => {
-      container.innerHTML = `<span>Rs. ${cardTotalText}</span>`;
+      container.innerHTML = `<span>$. ${cardTotalText}</span>`;
       container.setAttribute('data-base-price', cardTotalText);
       if (setAllAttrs) {
         container.setAttribute("customizer-mono-price", monoCharges.toFixed());
@@ -584,7 +590,15 @@
       list.classList.remove('openchilds');
     });
 
-    const targetUL = document.querySelector(`.${childsIn}[data-index="${index}"]`);
+    let targetUL = document.querySelector(`.${childsIn}[data-index="${index}"]`);
+    //   Self-heal: if the per-step inject above didn't materialize this list (e.g.
+    //   it was detached on a previous Prev/Apply and the targeted inject couldn't
+    //   re-match it), inject ALL deferred lists and retry — so opening a step never
+    //   renders empty ("click option, prev, click option → child not loading").
+    if (!targetUL && typeof window.__injectCustomizerChildLists === 'function') {
+      window.__injectCustomizerChildLists();
+      targetUL = document.querySelector(`.${childsIn}[data-index="${index}"]`);
+    }
     if (!targetUL) return;
 
     //   Decide which children match WHILE the <ul> is still display:none (toggling classes
@@ -703,11 +717,20 @@
       const currentUL = document.querySelector(`.${currentListClass}[data-index="${currentIndex}"]`);
       if (currentUL) {
         //   Leaving this step without applying (any unapplied pick was already
-        //   cleared by clearLastSelected): remove its heavy list from the DOM,
+        //   cleared by clearLastSelected): free its heavy list from the DOM,
         //   same as after Apply. It re-injects from the template if the user
         //   navigates back into it.
         currentUL.classList.remove('openchilds');
-        currentUL.remove();
+        //   Only DETACH the list if the lazy re-injection helper is available to
+        //   bring it back; otherwise just HIDE it. Removing unconditionally while
+        //   re-injection is unavailable (e.g. an out-of-sync customizer-open.js)
+        //   would destroy the list permanently — so reopening the step after Prev
+        //   would find nothing to show ("works once, then not loading after prev").
+        if (typeof window.__injectCustomizerChildList === 'function') {
+          currentUL.remove();
+        } else {
+          currentUL.classList.add('hidden');
+        }
       }
 
       //   Safety: the previous step was injected on the way forward, but make
@@ -1504,33 +1527,56 @@
           const reselection = event.target.getAttribute('reselection');
           const reselection_steps = event.target.getAttribute('reselection-step');
 
-          //   Editing from the summary jumps straight to a step's list, so make
-          //   sure all deferred child lists exist before we search them.
-          if (typeof window.__injectCustomizerChildLists === 'function') {
-            window.__injectCustomizerChildLists();
-          }
-          getAllChildTabs().forEach(tab => {
-            let hasVisibleLi = false;
-
-            const liItems = tab.querySelectorAll('li');
-            liItems.forEach(li => {
-              const parentId = li.getAttribute('parent-id');
-              if (parentId === reselection) {
-                li.classList.remove('hidden');
-                hasVisibleLi = true;
-              } else {
-                li.classList.add('hidden');
+          //   Editing from the summary jumps straight to a step's list. Reveal it
+          //   the SAME way getnewList does — loader + card reveal streamed across
+          //   frames — instead of the old synchronous pass. The old code injected
+          //   every deferred list and, in one frame, toggled `hidden` on every <li>
+          //   in every list AND laid out all matching cards at once. On a real
+          //   catalog that stalled the main thread for seconds ("stuck ui" when
+          //   editing from the summary), and because the pass touched the whole
+          //   catalog it froze regardless of which (even tiny) option was edited.
+          showChildListLoader();
+          //   Double rAF: let the loader paint before the heavy work runs.
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            if (typeof window.__injectCustomizerChildLists === 'function') {
+              window.__injectCustomizerChildLists();
+            }
+            const editSelector = `li[parent-id="${escapeAttrValue(reselection)}"]`;
+            const editMatches = [];
+            getAllChildTabs().forEach(tab => {
+              //   Not the edited step: DETACH it (don't just hide it). injectAll
+              //   above materialized the whole catalog only so we could locate the
+              //   edited parent's list; leaving every other list attached behind
+              //   the edited one left a giant DOM, so the NEXT interaction (e.g.
+              //   changing the selection) worked against thousands of nodes and
+              //   froze. Normal navigation only ever keeps one step's list
+              //   attached — match that. Detached lists re-inject on demand.
+              if (!tab.querySelector(editSelector)) {
+                tab.remove();
+                return;
               }
-            });
-
-            if (hasVisibleLi) {
+              //   Toggle classes while the list is still display:none (no layout).
+              //   Keep the matching cards hidden for now and collect them; they're
+              //   streamed in below so the browser never lays out hundreds at once.
+              tab.querySelectorAll('li').forEach(li => {
+                if (li.getAttribute('parent-id') === reselection) editMatches.push(li);
+                li.classList.add('hidden');
+              });
               tab.classList.remove('hidden');
               tab.classList.add('openchilds');
-              
-            } else {
-              tab.classList.add('hidden');
-            }
-          });
+            });
+            const EDIT_BATCH = 24;
+            let ei = 0;
+            (function revealEditBatch() {
+              const end = Math.min(ei + EDIT_BATCH, editMatches.length);
+              for (; ei < end; ei++) editMatches[ei].classList.remove('hidden');
+              if (ei < editMatches.length) {
+                requestAnimationFrame(revealEditBatch);
+              } else {
+                hideChildListLoader();
+              }
+            })();
+          }));
         }
       }
 
@@ -1900,12 +1946,25 @@
         //   (they only appeared to restore on a second click, once the lists existed).
         if (typeof window.__injectCustomizerChildLists === 'function') {
           window.__injectCustomizerChildLists();
+        } else {
+          //   Diagnostic: without this helper (defined by customizer-open.js) the
+          //   deferred option lists are never materialized, so the query below finds
+          //   no radios and the restore silently blanks. This almost always means
+          //   customizer-open.js and option-card.js are out-of-sync (one is a stale
+          //   cached/unpublished build). Surface it instead of failing quietly.
+          console.warn('[customizer] __injectCustomizerChildLists missing — option lists cannot be materialized for Load Previous. Ensure customizer-open.js and option-card.js are the same version (republish + hard refresh).');
         }
         const recheckinputs = document.querySelectorAll(
           'input[type="radio"], input[type="checkbox"], input[type="text"], input[type="hidden"], input[type="number"], input[style_name]'
         );
         const sectionCards = document.querySelectorAll('a.option-card[style_name]');
         getAllChildTabs().forEach(tab => tab.classList.add('hidden'));
+
+        //   Load Previous returns to the main style view, so the "currently open
+        //   step" heading no longer applies — hide it if it's still showing.
+        if (currently_open_option && !currently_open_option.classList.contains('hidden')) {
+          currently_open_option.classList.add('hidden');
+        }
 
         //   Highlight section headers if saved value found
         sectionCards.forEach(section => {
@@ -1987,7 +2046,16 @@
       requestAnimationFrame(() => requestAnimationFrame(() => {
         try {
           loadPreviousSelections();
-          //   Final recompute once every restored input is checked, so the total
+          //   Restore is done: every saved option is now captured on its parent
+          //   card (selected_options + applied-charge, set by applySelectionVisuals).
+          //   Free the heavy child lists we injected only to find/check the saved
+          //   radios — same as Apply — so their content doesn't linger in the DOM
+          //   after Load Previous. The checked radios persist on the detached nodes
+          //   and re-attach if the user edits a step.
+          if (typeof window.__removeCustomizerChildLists === 'function') {
+            window.__removeCustomizerChildLists();
+          }
+          //   Final recompute once every restored input is captured, so the total
           //   price reflects the fully-loaded selection before the loader hides.
           updatePrice();
         } finally {
