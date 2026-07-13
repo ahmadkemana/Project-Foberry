@@ -1476,6 +1476,13 @@
       nextToSizeBtn.classList.remove('hidden');
       Sizes.classList.add('hidden');
 
+      //   Free the heavy child-list DOM on Start Again — same as Apply/Prev/Load
+      //   Previous. Every selection was just cleared (and child-tab inputs unchecked
+      //   in step 5) above, so the lists re-inject clean when a step is opened again.
+      if (typeof window.__removeCustomizerChildLists === 'function') {
+        window.__removeCustomizerChildLists();
+      }
+
       // 10. Reset monogram navigation
       document.querySelector(".commonly")?.classList.remove("hidden");
       document.querySelector(".specific_mono")?.classList.add("hidden");
