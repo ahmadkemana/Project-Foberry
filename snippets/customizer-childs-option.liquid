@@ -56,7 +56,7 @@
 {% endcapture %}
                   sub-title="{{ sub_title }}"
                   {% for has_depended_options in option.dependent_options %}
-                    {% assign has_depended = has_depended_options.parent_id %} 
+                    {% assign has_depended = has_depended_options.id %} 
                     {{ has_depended }}
                   {% endfor %}
                   {% if option.has_dependent_options == '1' or option.has_dependent_options == 1 %}
@@ -111,7 +111,7 @@
 
               class="hidden {% if option.has_dependent_options == '1' or option.has_dependent_options == 1 %} hasdisabled {% endif %}"
               {% for has_depended_options in option.dependent_options %}
-                {% assign has_depended = has_depended_options.parent_id %}
+                {% assign has_depended = has_depended_options.id %}
                 {{ has_depended }}
               {% endfor %}
               {% if option.has_dependent_options == '1' or option.has_dependent_options == 1 %}
@@ -176,7 +176,7 @@
                         sub-options="1"
                       {{ CardSize }}
                       {% for has_depended_options in option.dependent_options %}
-                        {% assign has_depended = has_depended_options.parent_id %}
+                        {% assign has_depended = has_depended_options.id %}
                         {{ has_depended }}
                       {% endfor %}
                       {% if option.has_dependent_options == '1' or option.has_dependent_options == 1 %}
@@ -242,7 +242,7 @@
                   sub-options="{{ steps }}"
                   {{ CardSize }}
                   {% for has_depended_options in option.dependent_options %}
-                    {% assign has_depended = has_depended_options.parent_id %}
+                    {% assign has_depended = has_depended_options.id %}
                     {{ has_depended }}
                   {% endfor %}
                   {% if option.has_dependent_options == '1' or option.has_dependent_options == 1 %}
@@ -306,7 +306,7 @@
                            sub-options="1"
                           {{ CardSize }}
                           {% for has_depended_options in option.dependent_options %}
-                            {% assign has_depended = has_depended_options.parent_id %}
+                            {% assign has_depended = has_depended_options.id %}
                             {{ has_depended }}
                           {% endfor %}
                           {% if option.has_dependent_options == '1' or option.has_dependent_options == 1 %}
@@ -373,7 +373,7 @@
                       sub-options="{{ steps }}"
                       {{ CardSize }}
                       {% for has_depended_options in option.dependent_options %}
-                        {% assign has_depended = has_depended_options.parent_id %}
+                        {% assign has_depended = has_depended_options.id %}
                         {{ has_depended }}
                       {% endfor %}
                          {% capture sub_title %}

@@ -69,7 +69,7 @@
             {{CardSize}}
             current_index="1"
             {% for has_depended_options in option.dependent_options %}
-              {% assign has_depended = has_depended_options.parent_id %}
+              {% assign has_depended = has_depended_options.id %}
               {% assign has_depended_label = has_depended_options.label %}
             {% endfor %}
             has-depended="{{ has_depended }}"

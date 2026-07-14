@@ -45,8 +45,12 @@
   }
 
   function getAllOptionLis() {
-    if (!allOptionLis) allOptionLis = Array.from(document.querySelectorAll('li[child-id], li[data-id]'));
-    return allOptionLis;
+    //   Query fresh every call. With lazily-injected child lists, a snapshot cached
+    //   before a list was injected would permanently miss those options — which is
+    //   exactly what made restricted_option_ids silently no-op (every restricted
+    //   target lives in a child list). Only used by hasOptions (Apply/Load), not a
+    //   hot path, so the re-query cost is fine.
+    return Array.from(document.querySelectorAll('li[child-id], li[data-id]'));
   }
 
   function escapeAttrValue(value) {
@@ -77,6 +81,9 @@
     requestAnimationFrame(() => {
       priceUpdateScheduled = false;
       updatePrice();
+      //   Selection changed → re-evaluate dependent options that are currently in
+      //   the DOM (steps not yet opened are handled when getnewList injects them).
+      applyDependentState();
     });
   }
 
@@ -133,15 +140,20 @@
     // Enable Apply and store the selected input ID (not value)
     apply_btn.classList.remove('disabled');
     apply_btn.dataset.lastSelected = input.id;
-    //   Uncheck only the *other currently-checked* radio in this group. Collection
-    //   options can render thousands of radios per group, so querying just the
-    //   ":checked" ones (usually a single element) is far cheaper than looping the
-    //   whole cached group and writing .checked on every member.
-    document
-      .querySelectorAll(`input[data-main-parent="${escapeAttrValue(data_main_parent)}"]:checked`)
-      .forEach(el => {
-        if (el !== input) el.checked = false;
-      });
+    //   Uncheck only the *other currently-checked* radio in the SAME radio group,
+    //   where the group is the radio `name` (the option's immediate parent) — NOT
+    //   the top-level `data-main-parent`. A single main category (e.g. "Collar
+    //   Accent") holds several INDEPENDENT sub-selections (Full Collar, Inner Band,
+    //   …) that all share the same data-main-parent, so keying off it wrongly
+    //   cleared an unrelated accent's pick. Querying just the ":checked" ones
+    //   (usually one) keeps a collection group with thousands of radios cheap.
+    if (input.name) {
+      document
+        .querySelectorAll(`input[name="${escapeAttrValue(input.name)}"]:checked`)
+        .forEach(el => {
+          if (el !== input) el.checked = false;
+        });
+    }
     if (prev_tab?.classList.contains('summary-page')) {
       apply_btn.classList.remove('hidden');
       nextToSizeBtn?.classList.add('hidden');
@@ -236,9 +248,18 @@
     }
     schedulePriceUpdate();
   }
-  // --- Remove Applied Selection by ID ---
-  function removeAppliedSelectionById(inputId) {
-    const input = document.getElementById(inputId);
+  // --- Remove Applied Selection by ID (or element) ---
+  function removeAppliedSelectionById(inputOrId) {
+    //   Accept either an id or the element itself. Passing the element lets callers
+    //   un-apply a selection whose child list is currently DETACHED from the DOM
+    //   (e.g. a restriction un-applying an option that was applied in another step —
+    //   its list was freed on Apply). getElementById returns null for a detached
+    //   input, so an id-only lookup would silently no-op and leave the parent card
+    //   still showing as selected. The parent card lives in the always-present main
+    //   list, so it can still be cleared from the (detached) input's attributes.
+    const input = typeof inputOrId === 'string'
+      ? document.getElementById(inputOrId)
+      : inputOrId;
     if (!input) return;
     const parentId = input.getAttribute('data-main-parent');
     const parentLi = getOptionItemById(parentId);
@@ -367,6 +388,48 @@
   function updatePrice() {
     recalculatePrice();
   }
+  //   --- Dependent options ---
+  //   A dependent option (rendered with `has-depended="<dependency option id(s)>"`
+  //   and starting `hasdisabled`) becomes selectable ONLY when its exact dependency
+  //   option is chosen. The dependency is always a selectable leaf whose radio
+  //   carries child-id="<option id>", so "chosen" = that radio is applied (kept in
+  //   appliedRadioInputs even after its list detaches) OR live-checked.
+  function getSelectedOptionIds() {
+    const ids = new Set();
+    //   Add a selected radio's own option id (child-id) AND its full ancestry
+    //   (data-ancestor-ids). The ancestry lets a dependency on a NON-leaf option
+    //   resolve — e.g. a monogram position gated behind "Left Pocket" is satisfied
+    //   when any leaf under Left Pocket is chosen, not only Left Pocket itself.
+    const add = inp => {
+      const cid = inp.getAttribute('child-id');
+      if (cid) ids.add(cid);
+      const anc = inp.getAttribute('data-ancestor-ids');
+      if (anc) anc.split(',').forEach(a => { const t = a.trim(); if (t) ids.add(t); });
+    };
+    appliedRadioInputs.forEach(add);
+    document.querySelectorAll('input[type="radio"]:checked[child-id]').forEach(add);
+    return ids;
+  }
+  //   Toggle `hasdisabled` on every dependent option within `scope` to match the
+  //   current selection. Call with a freshly-injected list (getnewList) so a step's
+  //   dependents are correct the moment it opens, and globally after any selection
+  //   change so currently-visible dependents update live.
+  function applyDependentState(scope = document, selectedIds = getSelectedOptionIds()) {
+    scope.querySelectorAll('[has-depended]').forEach(el => {
+      //   Skip the monogram FONT list: there `has-depended` holds a text-length
+      //   limit (max_text_limit), NOT an option-dependency id — it's driven by
+      //   updateMonogramTextValue. Treating it as a dependency would wrongly
+      //   disable every font once any option is selected.
+      if (el.closest('.mono-input-box.fonts')) return;
+      const raw = el.getAttribute('has-depended');
+      if (!raw || !raw.trim()) return; // no dependency configured → leave as-is
+      const depIds = raw.split(',').map(s => s.trim()).filter(Boolean);
+      if (!depIds.length) return;
+      const satisfied = depIds.some(id => selectedIds.has(id));
+      const li = el.closest('li') || el;
+      li.classList.toggle('hasdisabled', !satisfied);
+    });
+  }
   // --- Clear Last Picked Radio on Prev Tab ---
   function clearLastSelected() {
     const apply_btn = document.querySelector('.apply_btn');
@@ -409,16 +472,21 @@
       monogramPrevTab.classList.add('mono-change');
     }
 
-    // If this input was previously applied but now unchecked → remove it
+    //   If this input was previously applied but now unchecked → un-apply it so its
+    //   parent card stops showing as selected. Pass the ELEMENT, not its id: an
+    //   applied option's child list is detached, so getElementById would return null
+    //   and the parent card would stay selected.
     if (!input.checked && input.hasAttribute('data-applied')) {
-      removeAppliedSelectionById(input.id);
+      removeAppliedSelectionById(input);
     }
 
-    // Also check for any applied inputs that got unchecked programmatically.
-    // Keep this to the small applied set instead of querying every radio.
+    // Also check for any applied inputs that got unchecked programmatically
+    // (e.g. by the same-group uncheck or a restriction). Keep this to the small
+    // applied set instead of querying every radio, and pass the element so a
+    // detached applied input still clears its parent card.
     Array.from(appliedRadioInputs).forEach(appliedInput => {
       if (!appliedInput.checked) {
-        removeAppliedSelectionById(appliedInput.id);
+        removeAppliedSelectionById(appliedInput);
       }
     });
   });
@@ -430,6 +498,20 @@
   // restricted and depended options  
   function hasOptions(restrictedOptionIds = [], restricted_option_Pid, selectedParentId, why_not_name) {
     const restrictedSet = new Set(restrictedOptionIds.map(String)); // normalize as strings
+    //   Restricted-option targets live in lazily-injected child lists. When this
+    //   selection restricts (or is undoing a previous restriction from) other
+    //   options, materialize every list first so the disable + cleanup passes below
+    //   can actually find them. The lists are hidden, so attaching them costs no
+    //   layout, and Apply's later __removeCustomizerChildLists frees them again —
+    //   the toggled `hasdisabled` classes persist on the (detached) nodes and
+    //   reappear when the user opens that step. Gated so unrestricted Applies pay
+    //   nothing.
+    if (
+      (restrictedSet.size > 0 || restricted_option_Pid) &&
+      typeof window.__injectCustomizerChildLists === 'function'
+    ) {
+      window.__injectCustomizerChildLists();
+    }
     // Remove previous disabled items related to the selected parent
     const monogram_tab = document.querySelector(".custom_monogram");
 
@@ -497,6 +579,43 @@
       }
     });
     }
+    //   If a now-restricted option was already APPLIED, fully un-apply it — not just
+    //   disable it. removeAppliedSelectionById clears the parent card's selected
+    //   visual + attributes, unchecks the child radio, drops it from the applied set
+    //   and recomputes the price. E.g. picking "Full Roll Up" (which restricts
+    //   "American Lope Half Sleeves") must also remove an existing Cuff-Style
+    //   selection of American Lope Half Sleeves ("unselect Cuff Style and its child").
+    //
+    //   Match the restriction against the applied option AND its ancestry — the
+    //   option itself (child-id), its immediate parent (data-parent) and its top
+    //   category (data-main-parent) — so a restriction that targets an option at
+    //   ANY level (leaf, mid-tree, or a whole main category) un-applies it. Iterate
+    //   a copy since removeAppliedSelectionById mutates appliedRadioInputs.
+    if (restrictedSet.size > 0) {
+      Array.from(appliedRadioInputs).forEach(inp => {
+        //   Match the restriction against the applied option's FULL ancestry
+        //   (data-ancestor-ids = main → … → immediate parent → self, from the
+        //   template), so a restriction targeting a MID-PATH ancestor un-applies a
+        //   leaf chosen under it. E.g. "Half Sleeves" restricts "Angled", and the
+        //   applied Cuff-Style leaf "Super Stiff" sits under Angled → the Cuff-Style
+        //   selection must clear. child-id/data-parent/data-main-parent alone only
+        //   cover self + immediate + top, missing grandparents. Fall back to those
+        //   for radios rendered before data-ancestor-ids existed.
+        const ancestorAttr = inp.getAttribute('data-ancestor-ids');
+        const ids = ancestorAttr
+          ? ancestorAttr.split(',').map(s => s.trim())
+          : [
+              inp.getAttribute('child-id'),
+              inp.getAttribute('data-parent'),
+              inp.getAttribute('data-main-parent'),
+            ];
+        if (ids.some(id => id && restrictedSet.has(id))) {
+          //   Pass the element (not its id): its child list is detached after Apply,
+          //   so an id lookup would fail and the parent card would stay selected.
+          removeAppliedSelectionById(inp);
+        }
+      });
+    }
     // Additional logic: If restricted_option_Pid is provided, handle its specific visual state
     if (restricted_option_Pid) {
       const parentLi = getOptionItemById(restricted_option_Pid);
@@ -511,13 +630,11 @@
         bottom?.classList.remove('hidden');
       }
     }
-    // Restore dependent options
-    const dependedLi = getOptionItemById(selectedParentId);
-    if (dependedLi?.querySelector('.option-card')) {
-      document.querySelectorAll(`input[has-depended="${selectedParentId}"]`).forEach(input => {
-        input.parentElement?.classList.remove('hasdisabled');
-      });
-    }
+    //   Dependent options are handled by applyDependentState() (called on every
+    //   selection change and when a step is injected), which enables a dependent
+    //   only when its exact dependency option is chosen. Re-evaluate now too, so a
+    //   restriction pass that unchecked an input immediately reflects in dependents.
+    applyDependentState();
   }
 
   const mainstyleLists = document.querySelector('.overview-list.style-list');
@@ -600,6 +717,11 @@
       targetUL = document.querySelector(`.${childsIn}[data-index="${index}"]`);
     }
     if (!targetUL) return;
+
+    //   Set this freshly-injected step's dependent-option (hasdisabled) state from
+    //   the current selection, while it's still display:none (toggling costs no
+    //   layout) — so options gated behind a dependency open in the right state.
+    applyDependentState(targetUL);
 
     //   Decide which children match WHILE the <ul> is still display:none (toggling classes
     //   on a hidden subtree costs no layout). Keep every card hidden for now and collect the

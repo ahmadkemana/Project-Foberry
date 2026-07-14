@@ -129,14 +129,19 @@
           {% assign has_depended = '' %}
           {% assign has_depended_label = '' %}
           {% if position.dependent_options != blank %}
-            {% assign first_option = position.dependent_options[0].option %}
-            {% if first_option.parent_id %}
-              {% assign has_depended = first_option.parent_id %}
-            {% else %}
-              {% assign has_depended = first_option.id %}
+            {%- comment -%}
+              The dependency id is on the FLAT `option_id` field; the nested `option`
+              object is null in the data, so reading `.option.id` / `.option.parent_id`
+              yielded an EMPTY has-depended and the position never gated. Prefer
+              option_id; fall back to the nested object if some payload provides it.
+            {%- endcomment -%}
+            {% assign dep = position.dependent_options[0] %}
+            {% if dep.option_id != blank %}
+              {% assign has_depended = dep.option_id %}
+            {% elsif dep.option.id %}
+              {% assign has_depended = dep.option.id %}
             {% endif %}
-
-            {% assign has_depended_label = position.dependent_options[0].option.label %}
+            {% assign has_depended_label = dep.option.label %}
           {% endif %}
 
           <li
