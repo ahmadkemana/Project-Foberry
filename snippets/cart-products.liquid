@@ -17,6 +17,7 @@
   type="module"
   fetchpriority="low"
 ></script>
+<script src="{{ 'money-format.js' | asset_url }}" defer></script>
 {% style %}
 
 {% endstyle %}
@@ -499,60 +500,61 @@ document.addEventListener("change", function (e) {
 });
 </script> {% endcomment %}
 <script>
-document.addEventListener("change", function (e) {
-  if (e.target.classList.contains("cart-items__qty-select")) {
+{%- liquid
+  if settings.currency_code_enabled_cart_items
+    assign item_money_format = shop.money_with_currency_format
+  else
+    assign item_money_format = shop.money_format
+  endif
+
+  if settings.currency_code_enabled_cart_total
+    assign total_money_format = shop.money_with_currency_format
+  else
+    assign total_money_format = shop.money_format
+  endif
+-%}
+(function () {
+  const ITEM_MONEY_FORMAT = {{ item_money_format | json }};
+  const TOTAL_MONEY_FORMAT = {{ total_money_format | json }};
+
+  document.addEventListener('change', function (e) {
+    if (!e.target.classList.contains('cart-items__qty-select')) return;
+
     const line = e.target.dataset.line;
     const quantity = e.target.value;
 
-    fetch('/cart/change.js', {
+    fetch('{{ routes.cart_change_url }}.js', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        line: line,
-        quantity: quantity
-      })
+      body: JSON.stringify({ line: line, quantity: quantity }),
     })
-    .then(res => res.json())
-    .then(cart => {
+      .then((res) => res.json())
+      .then((cart) => {
+        const total = window.formatThemeMoney(window.themeCartTotalCents(cart), TOTAL_MONEY_FORMAT);
 
-  // ✅ Update cart total
-  const totalEl = document.getElementById("cart-total-price");
-  if (totalEl) {
-    totalEl.innerHTML = formatMoney(cart.total_price);
-  }
+        const totalEl = document.getElementById('cart-total-price');
+        if (totalEl) totalEl.innerHTML = total;
 
-  // ✅ Update checkout button price
-  const checkoutBtn = document.getElementById("checkout");
-  if (checkoutBtn) {
-    checkoutBtn.innerHTML = `Checkout securely — ${formatMoney(cart.total_price)}`;
-  }
+        const checkoutBtn = document.getElementById('checkout');
+        if (checkoutBtn) checkoutBtn.innerHTML = `Checkout securely — ${total}`;
 
-      // ✅ Update current product price instantly
-      const updatedItem = cart.items[line - 1];
-
-      if (updatedItem) {
-
-        // Find matching price element
-        const priceEl = document.querySelector(
-          `.cart-items__price-value[data-line="${line}"]`
-        );
-
-        if (priceEl) {
-          priceEl.innerHTML = formatMoney(updatedItem.final_line_price);
+        const updatedItem = cart.items[line - 1];
+        if (updatedItem) {
+          const priceEl = document.querySelector(`.cart-items__price-value[data-line="${line}"]`);
+          if (priceEl) {
+            // The Liquid above adds the additional_price surcharge for the whole
+            // line, so the re-rendered price has to as well.
+            const lineTotal = updatedItem.final_line_price + window.themeAdditionalPriceCents(updatedItem);
+            priceEl.innerHTML = window.formatThemeMoney(lineTotal, ITEM_MONEY_FORMAT);
+          }
         }
-      }
 
-
-    });
-  }
-});
-
-function formatMoney(cents) {
-  return (cents / 100).toLocaleString('en-PK', {
-    style: 'currency',
-    currency: 'PKR'
+        // This path doesn't dispatch `cart:update`, so the bar won't hear about
+        // the new total on its own.
+        window.updateFreeShippingBar?.(cart);
+      });
   });
-}
+})();
 </script>
 
 {% stylesheet %}

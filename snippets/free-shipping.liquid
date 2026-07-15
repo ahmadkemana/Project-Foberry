@@ -427,31 +427,39 @@
 
 
 {%- liquid
-  assign currency = localization.country.currency.iso_code
+  assign currency = cart.currency.iso_code
 
-  if currency == 'PKR'
-    assign fs_threshold = settings.cart_free_shipping_threshold_pkr | times: 100
-  elsif currency == 'USD'
+  if currency == 'USD'
     assign fs_threshold = settings.cart_free_shipping_threshold_usd | times: 100
   else
     assign fs_threshold = settings.cart_free_shipping_threshold_pkr | times: 100
   endif
 
+  # Match the total shown in the cart, which includes the customizer surcharge
+  # each line carries as its additional_price property (see cart-summary.liquid).
   assign cart_total = cart.total_price
-  assign remaining = fs_threshold | minus: cart_total
+  for item in cart.items
+    assign additional_price = item.properties.additional_price | default: 0 | plus: 0
+    assign additional_total = additional_price | times: 100 | times: item.quantity
+    assign cart_total = cart_total | plus: additional_total
+  endfor
 
+  assign remaining = fs_threshold | minus: cart_total
   if remaining < 0
     assign remaining = 0
   endif
 
-  assign progress = cart_total | times: 100 | divided_by: fs_threshold
-  if progress > 100
-    assign progress = 100
-  endif
-
   assign unlocked = false
-  if cart_total >= fs_threshold
-    assign unlocked = true
+  assign progress = 0
+
+  if fs_threshold > 0
+    assign progress = cart_total | times: 100.0 | divided_by: fs_threshold
+    if progress > 100
+      assign progress = 100
+    endif
+    if cart_total >= fs_threshold
+      assign unlocked = true
+    endif
   endif
 
   assign remaining_money = remaining | money
@@ -462,7 +470,8 @@
   assign fs_text = fs_text | replace: '{amount}', threshold_money
 -%}
 
-{%- if settings.cart_free_shipping_enabled -%}
+{%- if settings.cart_free_shipping_enabled and fs_threshold > 0 -%}
+<script src="{{ 'money-format.js' | asset_url }}" defer></script>
 <div class="cart-free-shipping-bar{% if unlocked %} success{% endif %}"
      data-threshold="{{ fs_threshold }}">
 
@@ -568,80 +577,74 @@
 })();
 </script> {% endcomment %}
 
+{%- if settings.cart_free_shipping_enabled and fs_threshold > 0 -%}
 <script>
 (function () {
+  var MSG_PROGRESS = {{ settings.cart_free_shipping_message | json }};
+  var MSG_SUCCESS = {{ settings.cart_free_shipping_success | json }};
+  var MONEY_FORMAT = {{ shop.money_format | json }};
 
-  function updateFreeShipping(cartTotal) {
+  function render(cart) {
     var bar = document.querySelector('.cart-free-shipping-bar');
     if (!bar) return;
 
-    var threshold = parseInt(bar.dataset.threshold);
+    var threshold = parseInt(bar.dataset.threshold, 10);
+    if (!threshold) return;
+
     var fill = bar.querySelector('.fs-fill');
     var message = bar.querySelector('.fs-message');
+    if (!fill || !message) return;
 
-    var percent = Math.min((cartTotal / threshold) * 100, 100);
-    var remaining = Math.max(threshold - cartTotal, 0);
-    var unlocked = cartTotal >= threshold;
+    var total = window.themeCartTotalCents(cart);
+    var remaining = Math.max(threshold - total, 0);
 
-    fill.style.width = percent + '%';
+    fill.style.width = Math.min((total / threshold) * 100, 100) + '%';
 
-    if (unlocked) {
+    if (remaining === 0) {
       bar.classList.add('success');
-      message.textContent = {{ settings.cart_free_shipping_success | json }};
+      message.textContent = MSG_SUCCESS;
     } else {
       bar.classList.remove('success');
-
-      var text = {{ settings.cart_free_shipping_message | json }};
-      text = text
-        .replace('{remaining}', Shopify.formatMoney(remaining))
-        .replace('{amount}', Shopify.formatMoney(threshold));
-
-      message.textContent = text;
+      message.textContent = MSG_PROGRESS
+        .replace('{remaining}', window.formatThemeMoney(remaining, MONEY_FORMAT))
+        .replace('{amount}', window.formatThemeMoney(threshold, MONEY_FORMAT));
     }
   }
 
-  /* ✅ MutationObserver — price change detect */
-  function observeCartChanges() {
-    var target = document.body;
-
-    var observer = new MutationObserver(function () {
-      fetch('/cart.js')
-        .then(function(r){ return r.json(); })
-        .then(function(cart){
-          updateFreeShipping(cart.total_price);
-        });
-    });
-
-    observer.observe(target, {
-      childList: true,
-      subtree: true,
-      characterData: true
-    });
-  }
-
-  /* Shopify events */
-  document.addEventListener('cart:updated', function(e){
-    if (e.detail && e.detail.cart) {
-      updateFreeShipping(e.detail.cart.total_price);
-    }
-  });
-
-  document.addEventListener('cart:refresh', function(e){
-    if (e.detail && e.detail.cart) {
-      updateFreeShipping(e.detail.cart.total_price);
-    }
-  });
-
-  /* Initial load */
-  document.addEventListener('DOMContentLoaded', function(){
-    fetch('/cart.js')
-      .then(function(r){ return r.json(); })
-      .then(function(cart){
-        updateFreeShipping(cart.total_price);
+  // Coalesce bursts of cart updates into one refresh.
+  var pending = null;
+  function refresh() {
+    if (pending) return pending;
+    pending = fetch('{{ routes.cart_url }}.js')
+      .then(function (r) { return r.json(); })
+      .then(function (cart) {
+        pending = null;
+        render(cart);
+      })
+      .catch(function () {
+        pending = null;
       });
+    return pending;
+  }
 
-    observeCartChanges(); // 👈 IMPORTANT
+  // Cart adds and updates both dispatch `cart:update`, but only updates carry
+  // the whole cart on the event — adds carry just the added line, so those need
+  // a re-fetch to learn the new total.
+  document.addEventListener('cart:update', function (e) {
+    var cart = e.detail && e.detail.resource;
+    if (cart && typeof cart.total_price === 'number' && Array.isArray(cart.items)) {
+      render(cart);
+    } else {
+      refresh();
+    }
   });
 
+  // Let code that mutates the cart without dispatching `cart:update` (the cart
+  // drawer's quantity <select>) push the new cart straight in.
+  window.updateFreeShippingBar = function (cart) {
+    if (cart && Array.isArray(cart.items)) render(cart);
+    else refresh();
+  };
 })();
 </script>
+{%- endif -%}
